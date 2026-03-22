@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sand: #fdf6f3;
+  --slate-grey: #2e2c32;
+  --sky-blue: #c4cedf;
+  --deep-red: #7c1618;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+/* Native <dialog> used on the Customers page (no ::backdrop utilities in Tailwind v3). */
+dialog.customer-modal {
+  margin: auto;
+  border: none;
+  padding: 0;
+  max-width: min(28rem, calc(100vw - 2rem));
+  background: transparent;
+}
+
+dialog.customer-modal::backdrop {
+  background: rgba(46, 44, 50, 0.35);
+}
