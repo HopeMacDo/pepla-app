@@ -4,6 +4,8 @@ import IntakeStep from "./steps/IntakeStep";
 import CalendarStep from "./steps/CalendarStep";
 import CustomerDetailStep from "./steps/CustomerDetailStep";
 import CustomersListStep from "./steps/CustomersListStep";
+import AdminDashboardStep from "./steps/AdminDashboardStep";
+import IntakeDetailStep from "./steps/IntakeDetailStep";
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -33,6 +35,9 @@ function TopNav() {
         <NavLink to="/crm" className={({ isActive }) => cx(linkBase, isActive && active)}>
           Customers
         </NavLink>
+        <NavLink to="/admin" className={({ isActive }) => cx(linkBase, isActive && active)}>
+          Admin
+        </NavLink>
       </div>
     </div>
   );
@@ -58,6 +63,8 @@ export default function App() {
           <Route path="/calendar" element={<CalendarStep />} />
           <Route path="/crm" element={<CustomersListStep />} />
           <Route path="/crm/:id" element={<CustomerDetailStep />} />
+          <Route path="/admin" element={<AdminDashboardStep />} />
+          <Route path="/admin/intake/:id" element={<IntakeDetailStep />} />
         </Routes>
       </div>
     </div>

@@ -11,5 +11,25 @@ Goal:
 Sat Mar 21
 - Connecting to Supabase
 
-Gaol:
+Goal:
 - Working Customer list and search
+
+
+Sun Mar 22
+- Reorganize and simplify client list
+- Build funcitoning search
+- Add new client to database
+
+Connected a form to a live database
+Debugged a missing function error
+Navigated Supabase security policies, open broadly since no user auth for now
+Fixed a database schema issue, generate id for new clients
+
+Deleted the CSV seeding file entirely
+Removed all the old local storage for contacts/CRM
+Removed the old types that only supported the CSV flow
+Cleaned up the dependencies
+
+Goal:
+- Complete this weekend's checklist sans crashout
+- Try pushing to github again
