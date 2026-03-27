@@ -50,7 +50,7 @@ export default function CustomerDetailStep() {
     <div className="text-slateGrey">
       <div className="mx-auto max-w-lg">
         <Link
-          to="/crm"
+          to="/customers"
           className="font-display text-xs uppercase tracking-pepla text-slateGrey/70 underline decoration-slateGrey/25 underline-offset-4 hover:decoration-slateGrey/50"
         >
           Customers

@@ -157,7 +157,7 @@ export default function CustomersListStep() {
       const newId =
         data && typeof data === "object" && "id" in data ? String((data as { id: string }).id) : null;
       closeCreateModal();
-      if (newId) navigate(`/crm/${newId}`);
+      if (newId) navigate(`/customers/${newId}`);
       else await loadCustomers();
     } catch (err) {
       console.error("[customers] insert", err);
@@ -315,7 +315,7 @@ export default function CustomersListStep() {
             {filtered.map((c) => (
               <li key={c.id}>
                 <Link
-                  to={`/crm/${c.id}`}
+                  to={`/customers/${c.id}`}
                   className={cn(
                     "grid grid-cols-1 gap-2 px-4 py-4 transition sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-baseline sm:gap-6",
                     "hover:bg-white/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slateGrey/25 focus-visible:ring-inset"

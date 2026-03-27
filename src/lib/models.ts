@@ -21,6 +21,22 @@ export const IntakeAvailabilitySchema = z.object({
 });
 export type IntakeAvailability = z.infer<typeof IntakeAvailabilitySchema>;
 
+export const BookingProposalSchema = z.object({
+  serviceName: z.string().min(1),
+  durationMins: z.number().int().positive(),
+  price: z.number().nonnegative(),
+  deposit: z.number().nonnegative(),
+  slotStartISOs: z.array(z.string()).min(1),
+  sentAt: z.string(),
+  /** Studio has recorded deposit received (or payment integration, later). */
+  depositPaid: z.boolean().default(false),
+  /** Client’s chosen slot before deposit + selection finalize the calendar hold. */
+  pendingSlotISO: z.string().optional(),
+  /** Set when booking is finalized — appointment exists and time is blocked. */
+  selectedSlotISO: z.string().optional()
+});
+export type BookingProposal = z.infer<typeof BookingProposalSchema>;
+
 export const IntakeRequestSchema = z.object({
   id: z.string(),
   createdAt: z.string(),
@@ -32,7 +48,8 @@ export const IntakeRequestSchema = z.object({
   availability: z.string().min(1),
   availabilitySelections: IntakeAvailabilitySchema.optional(),
   photoDataUrls: z.array(z.string()).default([]),
-  status: IntakeStatusSchema.default("requests")
+  status: IntakeStatusSchema.default("requests"),
+  proposal: BookingProposalSchema.optional()
 });
 export type IntakeRequest = z.infer<typeof IntakeRequestSchema>;
 

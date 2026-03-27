@@ -80,7 +80,7 @@ export default function AdminDashboardStep() {
     <div className="grid gap-6">
       <Card>
         <CardHeader>
-          <div className="font-display tracking-pepla text-xs uppercase opacity-80">Admin</div>
+          <div className="font-display tracking-pepla text-xs uppercase opacity-80">Inbox</div>
           <div className="font-body mt-2 text-2xl">Intake inbox</div>
         </CardHeader>
         <CardBody>
@@ -113,11 +113,11 @@ export default function AdminDashboardStep() {
           </div>
 
           <div className="mt-4">
-            <label htmlFor="admin-search" className="sr-only">
+            <label htmlFor="inbox-search" className="sr-only">
               Search intake records
             </label>
             <input
-              id="admin-search"
+              id="inbox-search"
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -138,10 +138,17 @@ export default function AdminDashboardStep() {
                 {filtered.map((row) => (
                   <Link
                     key={row.id}
-                    to={`/admin/intake/${row.id}?tab=${currentTab}`}
+                    to={`/inbox/intake/${row.id}?tab=${currentTab}`}
                     className="rounded-2xl border border-slateGrey/15 bg-white/55 p-4 transition hover:bg-white/80"
                   >
-                    <div className="font-body text-lg">{[row.firstName, row.lastName].filter(Boolean).join(" ") || row.customerName}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-body text-lg">{[row.firstName, row.lastName].filter(Boolean).join(" ") || row.customerName}</div>
+                      {currentTab === "accepted" && row.proposal && (
+                        <span className="rounded-full border border-[#C59E6F]/40 bg-[#C59E6F]/10 px-2 py-0.5 font-display text-[10px] uppercase tracking-pepla text-[#8a6b47]">
+                          Proposal sent
+                        </span>
+                      )}
+                    </div>
                     <div className="mt-2 font-body text-sm opacity-75">{shortVision(row.vision)}</div>
                     <div className="mt-3 font-body text-xs uppercase tracking-[0.08em] opacity-70">{formatAvailability(row)}</div>
                   </Link>

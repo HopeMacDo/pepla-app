@@ -31,5 +31,12 @@ Removed the old types that only supported the CSV flow
 Cleaned up the dependencies
 
 Goal:
-- Complete this weekend's checklist sans crashout
 - Try pushing to github again
+
+
+Mon Mar 23
+- rework intake form
+- create intake form flow: submitted, reviewed, accepted/booked
+
+Goal:
+- add admin tab: inbox with tabbed pipeline and badge counts

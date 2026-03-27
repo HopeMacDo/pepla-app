@@ -1,5 +1,5 @@
 import { createStore, del, get, getMany, keys, set } from "idb-keyval";
-import type { Appointment, IntakeAvailability, IntakeRequest, IntakeStatus } from "./models";
+import type { Appointment, BookingProposal, IntakeAvailability, IntakeRequest, IntakeStatus } from "./models";
 
 const appStore = createStore("pepla-booking", "app");
 
@@ -19,6 +19,14 @@ function parseName(customerName: string) {
   return { firstName, lastName };
 }
 
+function normalizeProposal(p: IntakeRequest["proposal"]): IntakeRequest["proposal"] {
+  if (!p) return undefined;
+  return {
+    ...p,
+    depositPaid: p.depositPaid ?? false
+  };
+}
+
 function normalizeIntake(req: IntakeRequest): IntakeRequest {
   const parsed = parseName(req.customerName);
   return {
@@ -27,7 +35,8 @@ function normalizeIntake(req: IntakeRequest): IntakeRequest {
     lastName: req.lastName ?? parsed.lastName,
     vision: req.vision ?? "",
     availabilitySelections: req.availabilitySelections ?? emptyAvailability(),
-    status: req.status ?? "requests"
+    status: req.status ?? "requests",
+    proposal: normalizeProposal(req.proposal)
   };
 }
 
@@ -131,6 +140,138 @@ export async function updateIntakeStatus(id: string, status: IntakeStatus): Prom
   const next = { ...row, status };
   await putIntake(next);
   return next;
+}
+
+export type BookingProposalInput = Omit<BookingProposal, "sentAt" | "selectedSlotISO" | "depositPaid" | "pendingSlotISO">;
+
+function appointmentsOverlap(start: Date, end: Date, appointments: Appointment[]): boolean {
+  return appointments.some((a) => {
+    const as = new Date(a.startISO);
+    const ae = new Date(a.endISO);
+    return start < ae && as < end;
+  });
+}
+
+export async function sendBookingProposal(id: string, payload: BookingProposalInput): Promise<IntakeRequest | null> {
+  const row = await getIntakeById(id);
+  if (!row || row.status !== "accepted") return null;
+  const uniq = Array.from(new Set(payload.slotStartISOs)).sort((a, b) => a.localeCompare(b));
+  if (uniq.length === 0) return null;
+  const proposal: BookingProposal = {
+    serviceName: payload.serviceName.trim(),
+    durationMins: payload.durationMins,
+    price: payload.price,
+    deposit: payload.deposit,
+    slotStartISOs: uniq,
+    sentAt: new Date().toISOString(),
+    depositPaid: false,
+    pendingSlotISO: undefined,
+    selectedSlotISO: undefined
+  };
+  const next = { ...row, proposal };
+  await putIntake(next);
+  return next;
+}
+
+type FinalizeProposalResult =
+  | { ok: true; intake: IntakeRequest }
+  | { ok: false; error: "no_proposal" | "not_pending" | "incomplete" | "invalid_slot" | "conflict" | "already_finalized" };
+
+async function finalizeProposalBookingFromRow(row: IntakeRequest): Promise<FinalizeProposalResult> {
+  if (!row.proposal) return { ok: false, error: "no_proposal" };
+  if (row.status !== "accepted") return { ok: false, error: "not_pending" };
+  if (row.proposal.selectedSlotISO) return { ok: false, error: "already_finalized" };
+  if (!row.proposal.depositPaid || !row.proposal.pendingSlotISO) return { ok: false, error: "incomplete" };
+
+  const slotStartISO = row.proposal.pendingSlotISO;
+  if (!row.proposal.slotStartISOs.includes(slotStartISO)) return { ok: false, error: "invalid_slot" };
+  const start = new Date(slotStartISO);
+  if (Number.isNaN(start.getTime())) return { ok: false, error: "invalid_slot" };
+
+  const end = new Date(start.getTime() + row.proposal.durationMins * 60 * 1000);
+  const appointments = await listAppointments();
+  if (appointmentsOverlap(start, end, appointments)) {
+    return { ok: false, error: "conflict" };
+  }
+
+  const appt: Appointment = {
+    id: crypto.randomUUID(),
+    startISO: start.toISOString(),
+    endISO: end.toISOString(),
+    customerId: row.id,
+    customerName: row.customerName,
+    phoneNumber: row.phoneNumber,
+    notes: `${row.proposal.serviceName} · $${row.proposal.price} (deposit $${row.proposal.deposit})`
+  };
+  await putAppointment(appt);
+
+  const next: IntakeRequest = {
+    ...row,
+    status: "upcoming",
+    proposal: { ...row.proposal, selectedSlotISO: slotStartISO, pendingSlotISO: undefined }
+  };
+  await putIntake(next);
+  return { ok: true, intake: next };
+}
+
+export type SetProposalPendingSlotResult =
+  | { ok: true; intake: IntakeRequest; finalized: boolean }
+  | {
+      ok: false;
+      error: "not_found" | "no_proposal" | "not_pending" | "already_finalized" | "invalid_slot" | "conflict";
+    };
+
+/** Records the client’s preferred slot. Calendar block + Upcoming only after deposit is also recorded. */
+export async function setProposalPendingSlot(intakeId: string, slotStartISO: string): Promise<SetProposalPendingSlotResult> {
+  const row = await getIntakeById(intakeId);
+  if (!row) return { ok: false, error: "not_found" };
+  if (!row.proposal) return { ok: false, error: "no_proposal" };
+  if (row.status !== "accepted") return { ok: false, error: "not_pending" };
+  if (row.proposal.selectedSlotISO) return { ok: false, error: "already_finalized" };
+  if (!row.proposal.slotStartISOs.includes(slotStartISO)) return { ok: false, error: "invalid_slot" };
+  const start = new Date(slotStartISO);
+  if (Number.isNaN(start.getTime())) return { ok: false, error: "invalid_slot" };
+
+  const proposalAfterPick = { ...row.proposal, pendingSlotISO: slotStartISO };
+  const merged: IntakeRequest = { ...row, proposal: proposalAfterPick };
+  await putIntake(merged);
+
+  if (!proposalAfterPick.depositPaid) {
+    return { ok: true, intake: merged, finalized: false };
+  }
+
+  const fin = await finalizeProposalBookingFromRow(merged);
+  if (!fin.ok) {
+    if (fin.error === "conflict") return { ok: false, error: "conflict" };
+    return { ok: true, intake: merged, finalized: false };
+  }
+  return { ok: true, intake: fin.intake, finalized: true };
+}
+
+export type SetProposalDepositPaidResult =
+  | { ok: true; intake: IntakeRequest; finalized: boolean }
+  | { ok: false; error: "not_found" | "no_proposal" | "conflict" };
+
+/** Studio-side (or future payment webhook): marks deposit received; finalizes booking if client already chose a slot. */
+export async function setProposalDepositPaid(intakeId: string, paid: boolean): Promise<SetProposalDepositPaidResult> {
+  const row = await getIntakeById(intakeId);
+  if (!row) return { ok: false, error: "not_found" };
+  if (!row.proposal) return { ok: false, error: "no_proposal" };
+
+  const proposalAfterDeposit = { ...row.proposal, depositPaid: paid };
+  const merged: IntakeRequest = { ...row, proposal: proposalAfterDeposit };
+  await putIntake(merged);
+
+  if (!paid || !proposalAfterDeposit.pendingSlotISO) {
+    return { ok: true, intake: merged, finalized: false };
+  }
+
+  const fin = await finalizeProposalBookingFromRow(merged);
+  if (!fin.ok) {
+    if (fin.error === "conflict") return { ok: false, error: "conflict" };
+    return { ok: true, intake: merged, finalized: false };
+  }
+  return { ok: true, intake: fin.intake, finalized: true };
 }
 
 export async function putAppointment(appt: Appointment) {

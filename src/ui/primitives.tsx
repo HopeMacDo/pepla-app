@@ -1,19 +1,18 @@
 import type { PropsWithChildren } from "react";
+import { twMerge } from "tailwind-merge";
 
 export function Card(props: PropsWithChildren<{ className?: string }>) {
   return (
-    <div className={["rounded-2xl border border-slateGrey/15 bg-white/55 shadow-pepla", props.className ?? ""].join(" ")}>
-      {props.children}
-    </div>
+    <div className={twMerge("rounded-2xl border border-slateGrey/15 bg-white/55 shadow-pepla", props.className)}>{props.children}</div>
   );
 }
 
 export function CardHeader(props: PropsWithChildren<{ className?: string }>) {
-  return <div className={["px-6 pt-6", props.className ?? ""].join(" ")}>{props.children}</div>;
+  return <div className={twMerge("px-6 pt-6", props.className)}>{props.children}</div>;
 }
 
 export function CardBody(props: PropsWithChildren<{ className?: string }>) {
-  return <div className={["px-6 pb-6 pt-4", props.className ?? ""].join(" ")}>{props.children}</div>;
+  return <div className={twMerge("px-6 pb-6 pt-4", props.className)}>{props.children}</div>;
 }
 
 export function Label(props: PropsWithChildren<{ htmlFor?: string }>) {
