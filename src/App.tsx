@@ -11,6 +11,7 @@ import SettingsPage, {
 import TodayPage from "./pages/TodayPage";
 import IntakeStep from "./steps/IntakeStep";
 import CalendarStep from "./steps/CalendarStep";
+import CalendarNewBookingPage from "./pages/CalendarNewBookingPage";
 import CustomerDetailStep from "./steps/CustomerDetailStep";
 import CustomersListStep from "./steps/CustomersListStep";
 import AdminDashboardStep from "./steps/AdminDashboardStep";
@@ -112,6 +113,7 @@ export default function App() {
         <Route path="/inbox" element={<AdminDashboardStep />} />
         <Route path="/inbox/intake/:id" element={<IntakeDetailStep />} />
         <Route path="/calendar" element={<CalendarStep />} />
+        <Route path="/calendar/new" element={<CalendarNewBookingPage />} />
         <Route path="/customers" element={<CustomersListStep />} />
         <Route path="/customers/:id" element={<CustomerDetailStep />} />
         <Route path="/settings" element={<SettingsPage />}>

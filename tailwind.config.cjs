@@ -9,23 +9,41 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        sand: "#FDF6F3",
-        slateGrey: "#2E2C32",
-        skyBlue: "#C4CEDF",
-        deepRed: "#7C1618"
+        void: "rgb(var(--void) / <alpha-value>)",
+        ash: "rgb(var(--ash) / <alpha-value>)",
+        fog: "rgb(var(--fog) / <alpha-value>)",
+        dust: "rgb(var(--dust) / <alpha-value>)",
+        parchment: "rgb(var(--parchment) / <alpha-value>)",
+        chalk: "rgb(var(--chalk) / <alpha-value>)",
+        sky: "rgb(var(--sky) / <alpha-value>)",
+        ember: "rgb(var(--ember) / <alpha-value>)",
+        sand: "rgb(var(--parchment) / <alpha-value>)",
+        slateGrey: "rgb(var(--void) / <alpha-value>)",
+        skyBlue: "rgb(var(--sky) / <alpha-value>)",
+        deepRed: "rgb(var(--ember) / <alpha-value>)",
       },
       fontFamily: {
-        display: ['"Dreaming Outloud"', "ui-sans-serif", "system-ui", "sans-serif"],
-        body: ['"Times New Roman"', "Times", "serif"]
+        sans: ['"DM Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ['"DM Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
+        body: ['"DM Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
       },
       letterSpacing: {
-        pepla: "0.22em"
+        pepla: "0.1em",
       },
       boxShadow: {
-        pepla: "0 1px 0 rgba(46,44,50,0.10)"
-      }
-    }
+        pepla: "0 1px 0 rgba(14, 14, 14, 0.1)",
+      },
+      borderRadius: {
+        sm: "2px",
+        DEFAULT: "var(--radius)",
+        md: "var(--radius)",
+        lg: "var(--radius)",
+        xl: "var(--radius)",
+        "2xl": "var(--radius)",
+        "3xl": "var(--radius)",
+        full: "var(--radius)",
+      },
+    },
   },
-  plugins: []
+  plugins: [],
 };
-

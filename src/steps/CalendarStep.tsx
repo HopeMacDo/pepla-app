@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Card, CardBody, CardHeader, Button, Input, Label, Textarea } from "../ui/primitives";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Button, Input, Label, Textarea } from "../ui/primitives";
 import type { Appointment } from "../lib/models";
 import { deleteAppointment, listAppointments, putAppointment } from "../lib/storage";
 
@@ -28,6 +28,71 @@ function endOfMonth(d: Date) {
 
 function addMonths(d: Date, delta: number) {
   return new Date(d.getFullYear(), d.getMonth() + delta, 1);
+}
+
+function addDays(d: Date, delta: number) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + delta);
+}
+
+/** Sunday-start week, local midnight. */
+function startOfWeek(d: Date) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - x.getDay());
+  return x;
+}
+
+function calendarDate(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/** Inclusive last hour row label (e.g. 21 → 9 PM block). */
+const WEEK_GRID_FIRST_HOUR = 7;
+const WEEK_GRID_LAST_HOUR = 21;
+const WEEK_PX_PER_HOUR = 52;
+
+/** Horizontal guides every N hours — lighter than a line per hour (matches monthly’s calmer grid). */
+const WEEK_GUIDE_EVERY_HOURS = 2;
+
+const WEEK_GRID_SPAN_MIN = (WEEK_GRID_LAST_HOUR - WEEK_GRID_FIRST_HOUR + 1) * 60;
+const WEEK_SLOT_MINUTES = 15;
+
+function weekSlotFromOffsetY(offsetY: number, durationMins: number) {
+  const rawMin = (offsetY / WEEK_PX_PER_HOUR) * 60;
+  const snapped = Math.round(rawMin / WEEK_SLOT_MINUTES) * WEEK_SLOT_MINUTES;
+  const maxStart = Math.max(0, WEEK_GRID_SPAN_MIN - durationMins);
+  const startMinFromGrid = Math.max(0, Math.min(snapped, maxStart));
+  const top = (startMinFromGrid / 60) * WEEK_PX_PER_HOUR;
+  const height = (durationMins / 60) * WEEK_PX_PER_HOUR;
+  return { top, height, startMinFromGrid };
+}
+
+function timeStringFromGridStartMinutes(startMinFromGrid: number) {
+  const h = WEEK_GRID_FIRST_HOUR + Math.floor(startMinFromGrid / 60);
+  const mm = startMinFromGrid % 60;
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+const WEEK_HOUR_ROWS = Array.from(
+  { length: WEEK_GRID_LAST_HOUR - WEEK_GRID_FIRST_HOUR + 1 },
+  (_, i) => WEEK_GRID_FIRST_HOUR + i
+);
+
+function layoutApptInWeekGrid(a: Appointment): { top: number; height: number } | null {
+  const start = new Date(a.startISO);
+  const end = new Date(a.endISO);
+  let startMin = start.getHours() * 60 + start.getMinutes() - WEEK_GRID_FIRST_HOUR * 60;
+  let endMin = end.getHours() * 60 + end.getMinutes() - WEEK_GRID_FIRST_HOUR * 60;
+  const gridMax = (WEEK_GRID_LAST_HOUR - WEEK_GRID_FIRST_HOUR + 1) * 60;
+  if (endMin <= 0 || startMin >= gridMax) return null;
+  startMin = Math.max(0, startMin);
+  endMin = Math.min(gridMax, endMin);
+  const top = (startMin / 60) * WEEK_PX_PER_HOUR;
+  const height = Math.max(((endMin - startMin) / 60) * WEEK_PX_PER_HOUR, 22);
+  return { top, height };
+}
+
+function weekApptVariant(id: string) {
+  return id.charCodeAt(0) % 2 === 0 ? "solid" : "soft";
 }
 
 function sameDay(a: Date, b: Date) {
@@ -58,6 +123,32 @@ function buildMonthGrid(month: Date) {
   return days;
 }
 
+/** Single-month grid for picker: leading/trailing empty slots, no adjacent-month dates. */
+function buildPickerMonthCells(monthAnchor: Date): (number | null)[] {
+  const first = startOfMonth(monthAnchor);
+  const lastDay = endOfMonth(monthAnchor).getDate();
+  const lead = first.getDay();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < lead; i++) cells.push(null);
+  for (let d = 1; d <= lastDay; d++) cells.push(d);
+  const trail = (7 - (cells.length % 7)) % 7;
+  for (let i = 0; i < trail; i++) cells.push(null);
+  return cells;
+}
+
+/** ISO 8601 week number (1–53) for the local calendar date. */
+function isoWeekNumber(dt: Date): number {
+  const t = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  const dayNr = (t.getDay() + 6) % 7;
+  t.setDate(t.getDate() - dayNr + 3);
+  const firstThursday = t.getTime();
+  t.setMonth(0, 1);
+  if (t.getDay() !== 4) {
+    t.setMonth(0, 1 + ((4 - t.getDay() + 7) % 7));
+  }
+  return 1 + Math.round((firstThursday - t.getTime()) / 604800000);
+}
+
 function defaultStartForDay(d: Date) {
   const start = new Date(d);
   start.setHours(11, 0, 0, 0);
@@ -70,15 +161,81 @@ function apptSummaryDots(count: number) {
 }
 
 const VIEW_OPTIONS: { id: CalendarViewMode; label: string }[] = [
-  { id: "month", label: "Month" },
-  { id: "week", label: "Week" },
-  { id: "day", label: "Day" }
+  { id: "month", label: "Monthly" },
+  { id: "week", label: "Weekly" },
+  { id: "day", label: "Daily" }
 ];
 
+const MONTH_PICKER_PAST = 48;
+const MONTH_PICKER_FUTURE = 72;
+
+function sameMonth(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
+const iconBtnBase =
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border-0 bg-transparent text-slateGrey shadow-none outline-none transition hover:bg-slateGrey/5 hover:shadow-sm disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-slateGrey/20";
+
+function IconChevronLeft({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+    </svg>
+  );
+}
+
+function IconChevronRight({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function IconChevronDown({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+    </svg>
+  );
+}
+
+function IconPlus({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function IconDotsVertical({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <circle cx="12" cy="5" r="1.75" />
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="12" cy="19" r="1.75" />
+    </svg>
+  );
+}
+
+function IconClose({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
 export default function CalendarStep() {
+  const navigate = useNavigate();
   const [sp] = useSearchParams();
   const [calendarView, setCalendarView] = useState<CalendarViewMode>("month");
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
+  const [weekCursor, setWeekCursor] = useState(() => calendarDate(new Date()));
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const viewMenuRef = useRef<HTMLDivElement>(null);
+  const activePickerMonthRef = useRef<HTMLDivElement | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => isoDate(new Date()));
   const [customerName, setCustomerName] = useState(() => sp.get("name") ?? "");
   const [phoneNumber, setPhoneNumber] = useState(() => sp.get("phone") ?? "");
@@ -89,6 +246,17 @@ export default function CalendarStep() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [newStartTime, setNewStartTime] = useState("11:00");
   const [durationMins, setDurationMins] = useState(60);
+  const [hoveredMonthWeekRow, setHoveredMonthWeekRow] = useState<number | null>(null);
+  const [hoveredMonthDayKey, setHoveredMonthDayKey] = useState<string | null>(null);
+  const [weekSlotHover, setWeekSlotHover] = useState<{ k: string; top: number; height: number } | null>(null);
+  const [hoveredWeekHeaderDayKey, setHoveredWeekHeaderDayKey] = useState<string | null>(null);
+  const [nowTick, setNowTick] = useState(0);
+  const weekScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick((t) => t + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -107,6 +275,33 @@ export default function CalendarStep() {
             notes: note
           } satisfies Appointment;
         };
+        const mkOnDay = (day: Date, hour: number, minute: number, durationMins: number, name: string, note?: string) => {
+          const base = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute, 0, 0);
+          const end = new Date(base.getTime() + durationMins * 60 * 1000);
+          return {
+            id: crypto.randomUUID(),
+            startISO: base.toISOString(),
+            endISO: end.toISOString(),
+            customerName: name,
+            phoneNumber: "+1 (760) 555-0123",
+            notes: note
+          } satisfies Appointment;
+        };
+        const thisWeekStart = startOfWeek(calendarDate(new Date()));
+        const weekDemo: Appointment[] = [
+          mkOnDay(addDays(thisWeekStart, 0), 9, 0, 90, "Riley Chen", "Flash sheet · linework"),
+          mkOnDay(addDays(thisWeekStart, 0), 14, 0, 60, "Sam Ortiz", "Touch-up"),
+          mkOnDay(addDays(thisWeekStart, 1), 10, 30, 60, "Jordan Lee", "Consult · placement"),
+          mkOnDay(addDays(thisWeekStart, 1), 15, 0, 60, "Quinn Park", "Deposit block"),
+          mkOnDay(addDays(thisWeekStart, 2), 11, 0, 120, "Alex Kim", "Session 2 · sleeve"),
+          mkOnDay(addDays(thisWeekStart, 3), 9, 30, 60, "Morgan Wu", "Stencil review"),
+          mkOnDay(addDays(thisWeekStart, 3), 15, 0, 60, "Taylor Reed", "Healing check"),
+          mkOnDay(addDays(thisWeekStart, 4), 10, 0, 60, "Casey Nova", "Lettering"),
+          mkOnDay(addDays(thisWeekStart, 4), 16, 30, 90, "Avery Bloom", "Shading pass"),
+          mkOnDay(addDays(thisWeekStart, 5), 12, 0, 90, "Drew Ellis", "Color pack"),
+          mkOnDay(addDays(thisWeekStart, 6), 11, 0, 60, "Rowan Tate", "Mini piece"),
+          mkOnDay(addDays(thisWeekStart, 6), 14, 0, 60, "Sky Loft", "Walk-in consult")
+        ];
         const fake: Appointment[] = [
           mk(0, 11, 0, "Aaliyah H.", "Fine-line florals · forearm"),
           mk(0, 14, 30, "Amber A.", "Touch-up · small script"),
@@ -129,7 +324,8 @@ export default function CalendarStep() {
           mk(19, 12, 0, "Charlie W.", "Full day"),
           mk(20, 10, 30, "Pat S.", "Cover-up consult"),
           mk(22, 15, 0, "Kim J.", "Color pack"),
-          mk(23, 11, 0, "Lee H.", "Mini piece")
+          mk(23, 11, 0, "Lee H.", "Mini piece"),
+          ...weekDemo
         ];
         await Promise.all(fake.map((a) => putAppointment(a)));
         setAppointments(await listAppointments());
@@ -138,6 +334,45 @@ export default function CalendarStep() {
       }
     })();
   }, []);
+
+  const pickerMonths = useMemo(() => {
+    const start = startOfMonth(new Date());
+    const list: Date[] = [];
+    for (let i = -MONTH_PICKER_PAST; i <= MONTH_PICKER_FUTURE; i++) {
+      list.push(addMonths(start, i));
+    }
+    return list;
+  }, []);
+
+  useEffect(() => {
+    if (!viewMenuOpen) return;
+    function onDoc(e: MouseEvent) {
+      const t = e.target as Node;
+      if (viewMenuRef.current && !viewMenuRef.current.contains(t)) setViewMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [viewMenuOpen]);
+
+  useEffect(() => {
+    if (!monthPickerOpen && !viewMenuOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setMonthPickerOpen(false);
+        setViewMenuOpen(false);
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [monthPickerOpen, viewMenuOpen]);
+
+  useEffect(() => {
+    if (!monthPickerOpen) return;
+    const id = requestAnimationFrame(() => {
+      activePickerMonthRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [monthPickerOpen, selectedDate]);
 
   const apptsForDay = useMemo(() => {
     const day = parseISODate(selectedDate);
@@ -153,6 +388,15 @@ export default function CalendarStep() {
       .sort((a, b) => a.startISO.localeCompare(b.startISO));
   }, [appointments, selectedDate]);
 
+  const weekStart = useMemo(() => startOfWeek(weekCursor), [weekCursor]);
+  const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+
+  const headerTitle = useMemo(() => {
+    if (calendarView === "month") return isoMonthLabel(monthCursor);
+    if (calendarView === "week") return isoMonthLabel(addDays(weekStart, 3));
+    return isoMonthLabel(parseISODate(selectedDate));
+  }, [calendarView, monthCursor, selectedDate, weekStart]);
+
   const monthDays = useMemo(() => buildMonthGrid(monthCursor), [monthCursor]);
   const monthApptCountByDay = useMemo(() => {
     const map = new Map<string, number>();
@@ -163,14 +407,69 @@ export default function CalendarStep() {
     return map;
   }, [appointments]);
 
-  const totalThisMonth = useMemo(() => {
-    const m = monthCursor.getMonth();
-    const y = monthCursor.getFullYear();
-    return appointments.filter((a) => {
-      const d = new Date(a.startISO);
-      return d.getFullYear() === y && d.getMonth() === m;
-    }).length;
-  }, [appointments, monthCursor]);
+  const apptsByDayKey = useMemo(() => {
+    const map = new Map<string, Appointment[]>();
+    for (const a of appointments) {
+      const k = isoDate(new Date(a.startISO));
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(a);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.startISO.localeCompare(b.startISO));
+    }
+    return map;
+  }, [appointments]);
+
+  const dayViewGrid = useMemo(() => {
+    const d = calendarDate(parseISODate(selectedDate));
+    const k = selectedDate;
+    return {
+      d,
+      k,
+      dayAppts: apptsByDayKey.get(k) ?? [],
+      isPastCol: calendarDate(d) < calendarDate(new Date()),
+      isTodayCol: sameDay(d, new Date())
+    };
+  }, [selectedDate, apptsByDayKey]);
+
+  const weekGridHeight = (WEEK_GRID_LAST_HOUR - WEEK_GRID_FIRST_HOUR + 1) * WEEK_PX_PER_HOUR;
+
+  const weekColumnGuideStyle = useMemo(() => {
+    const period = WEEK_PX_PER_HOUR * WEEK_GUIDE_EVERY_HOURS;
+    return {
+      height: weekGridHeight,
+      backgroundImage: `repeating-linear-gradient(to bottom, transparent 0px, transparent ${period - 1}px, rgba(0, 0, 0, 0.045) ${period - 1}px, rgba(0, 0, 0, 0.045) ${period}px)`
+    } as const;
+  }, [weekGridHeight]);
+
+  const nowLineOffsetPx = useMemo(() => {
+    const now = new Date();
+    const mins = now.getHours() * 60 + now.getMinutes() - WEEK_GRID_FIRST_HOUR * 60;
+    const maxMins = (WEEK_GRID_LAST_HOUR - WEEK_GRID_FIRST_HOUR + 1) * 60;
+    if (mins < 0 || mins > maxMins) return null;
+    if (calendarView === "day") {
+      if (!sameDay(parseISODate(selectedDate), now)) return null;
+      return (mins / 60) * WEEK_PX_PER_HOUR;
+    }
+    if (!weekDays.some((d) => sameDay(d, now))) return null;
+    return (mins / 60) * WEEK_PX_PER_HOUR;
+  }, [calendarView, selectedDate, weekDays, nowTick]);
+
+  useEffect(() => {
+    if (calendarView !== "week" && calendarView !== "day") return;
+    const el = weekScrollRef.current;
+    if (!el) return;
+    const first = (11 - WEEK_GRID_FIRST_HOUR) * WEEK_PX_PER_HOUR;
+    el.scrollTo({ top: Math.max(0, first - WEEK_PX_PER_HOUR), behavior: "auto" });
+  }, [calendarView, weekStart, selectedDate]);
+
+  useEffect(() => {
+    setWeekSlotHover(null);
+  }, [calendarView, weekStart, selectedDate, durationMins]);
+
+  useEffect(() => {
+    if (calendarView !== "week") setHoveredWeekHeaderDayKey(null);
+  }, [calendarView]);
 
   const canCreate = useMemo(() => Boolean(customerName.trim() && !busy), [busy, customerName]);
 
@@ -223,174 +522,785 @@ export default function CalendarStep() {
     }
   }
 
+  const dowLetters = ["S", "M", "T", "W", "T", "F", "S"];
+
+  function openWeekDayColumn(d: Date) {
+    setSelectedDate(isoDate(d));
+    const s = defaultStartForDay(d);
+    setNewStartTime(`${String(s.getHours()).padStart(2, "0")}:${String(s.getMinutes()).padStart(2, "0")}`);
+    setDetailOpen(true);
+  }
+
+  function openWeekSlotForDay(d: Date, startMinFromGrid: number) {
+    setSelectedDate(isoDate(d));
+    setNewStartTime(timeStringFromGridStartMinutes(startMinFromGrid));
+    setDetailOpen(true);
+  }
+
+  function goToDailyFromWeekHeader(d: Date) {
+    const cd = calendarDate(d);
+    setSelectedDate(isoDate(cd));
+    setMonthCursor(startOfMonth(cd));
+    setWeekCursor(cd);
+    setCalendarView("day");
+  }
+
+  function openWeekAppt(a: Appointment) {
+    setSelectedDate(isoDate(new Date(a.startISO)));
+    const s = new Date(a.startISO);
+    setNewStartTime(`${String(s.getHours()).padStart(2, "0")}:${String(s.getMinutes()).padStart(2, "0")}`);
+    setDetailOpen(true);
+  }
+
+  function pickCalendarDay(monthFirst: Date, dayNum: number) {
+    const d = calendarDate(new Date(monthFirst.getFullYear(), monthFirst.getMonth(), dayNum));
+    setSelectedDate(isoDate(d));
+    setMonthCursor(startOfMonth(d));
+    setWeekCursor(d);
+    setMonthPickerOpen(false);
+  }
+
+  function pickTodayClosePicker() {
+    const today = calendarDate(new Date());
+    setSelectedDate(isoDate(today));
+    setMonthCursor(startOfMonth(today));
+    setWeekCursor(today);
+    setMonthPickerOpen(false);
+  }
+
+  /** Jump to today: month grid shows this month, week strip shows this week, day uses today as selected date. */
+  function jumpToTodayForView() {
+    const today = calendarDate(new Date());
+    setMonthPickerOpen(false);
+    setViewMenuOpen(false);
+    setSelectedDate(isoDate(today));
+    setMonthCursor(startOfMonth(today));
+    setWeekCursor(today);
+  }
+
+  /** Switch to monthly view and align the month grid with the title context. */
+  function goToMonthlyFromTitle() {
+    setMonthPickerOpen(false);
+    setViewMenuOpen(false);
+    if (calendarView === "week") {
+      setMonthCursor(startOfMonth(addDays(weekStart, 3)));
+    } else {
+      setMonthCursor(startOfMonth(parseISODate(selectedDate)));
+    }
+    setCalendarView("month");
+  }
+
+  const pickerDowLabels = ["S", "M", "T", "W", "T", "F", "S"];
+
   return (
-    <div className="mx-auto w-full max-w-5xl">
-      <Card>
-        <CardHeader className="px-4 pb-1.5 pt-4 sm:px-6 sm:pt-5">
-          <div className="font-body text-xl sm:text-2xl">Book an appointment</div>
-          <div className="font-body mt-0.5 max-w-2xl text-sm opacity-80">
-            Full-month calendar with booking hints. Click a date to add or review bookings.
-          </div>
-        </CardHeader>
-        <CardBody className="px-4 pb-4 pt-0 sm:px-6 sm:pb-5">
-          <div className="flex flex-col gap-3 sm:gap-4">
-            <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div className="font-display tracking-pepla text-[10px] uppercase opacity-80">Month</div>
-                <div className="font-body text-lg leading-tight sm:text-xl">{isoMonthLabel(monthCursor)}</div>
-              </div>
-
-              <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
-                <div
-                  className="inline-flex self-start rounded-full border border-slateGrey/15 bg-white/45 p-0.5 sm:self-center"
-                  role="tablist"
-                  aria-label="Calendar view"
+    <div className="mx-auto w-full max-w-5xl px-4 pb-6 pt-4 sm:px-6 sm:pb-8 sm:pt-5">
+      <div className="mb-3 flex items-center gap-2 sm:mb-4">
+        <div className="relative shrink-0" ref={viewMenuRef}>
+          <button
+            type="button"
+            className={iconBtnBase}
+            aria-expanded={viewMenuOpen}
+            aria-haspopup="menu"
+            aria-label="Calendar view options"
+            onClick={() => {
+              setMonthPickerOpen(false);
+              setViewMenuOpen((o) => !o);
+            }}
+          >
+            <IconDotsVertical className="h-5 w-5 text-slateGrey/80" />
+          </button>
+          {viewMenuOpen && (
+            <div
+              className="absolute left-0 top-full z-40 mt-1 w-48 overflow-hidden rounded-xl border border-slateGrey/15 bg-sand/95 py-1 shadow-lg backdrop-blur"
+              role="menu"
+              aria-label="Choose calendar view"
+            >
+              {VIEW_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="menuitem"
+                  className={[
+                    "flex w-full items-center gap-2 px-3 py-2.5 text-left font-display text-[11px] uppercase tracking-pepla transition hover:bg-white/50",
+                    calendarView === opt.id ? "text-slateGrey" : "text-slateGrey/75"
+                  ].join(" ")}
+                  onClick={() => {
+                    if (opt.id === "week" && calendarView !== "week") {
+                      setWeekCursor(calendarDate(parseISODate(selectedDate)));
+                    }
+                    if (opt.id === "month" && calendarView !== "month") {
+                      setMonthCursor(startOfMonth(parseISODate(selectedDate)));
+                    }
+                    if (opt.id === "day" && calendarView !== "day") {
+                      const d = calendarDate(parseISODate(selectedDate));
+                      setMonthCursor(startOfMonth(d));
+                      setWeekCursor(d);
+                    }
+                    setCalendarView(opt.id);
+                    setViewMenuOpen(false);
+                  }}
                 >
-                  {VIEW_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={calendarView === opt.id}
-                      onClick={() => setCalendarView(opt.id)}
-                      className={[
-                        "rounded-full px-2.5 py-1 font-display text-[10px] uppercase tracking-pepla transition sm:px-3 sm:text-[11px]",
-                        calendarView === opt.id
-                          ? "bg-slateGrey text-sand shadow-sm"
-                          : "text-slateGrey/85 hover:bg-white/55"
-                      ].join(" ")}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-1">
-                  <Button variant="ghost" size="sm" onClick={() => setMonthCursor((m) => addMonths(m, -1))} disabled={busy}>
-                    Prev
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setMonthCursor(startOfMonth(new Date()))} disabled={busy}>
-                    Today
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setMonthCursor((m) => addMonths(m, 1))} disabled={busy}>
-                    Next
-                  </Button>
-                </div>
-              </div>
+                  <span className="flex w-4 shrink-0 justify-center text-[#7C1618]" aria-hidden>
+                    {calendarView === opt.id ? "✓" : ""}
+                  </span>
+                  {opt.label}
+                </button>
+              ))}
             </div>
+          )}
+        </div>
 
-            <div className="flex flex-col gap-1.5 rounded-xl border border-slateGrey/15 bg-white/40 px-2.5 py-1.5 sm:flex-row sm:items-center sm:justify-between sm:px-3 sm:py-2">
-              <div className="font-body text-xs opacity-80 sm:text-sm">
-                Total bookings this month: <span className="text-slateGrey">{totalThisMonth}</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-0.5">
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-deepRed/90" />
-                  <span className="font-body text-[10px] opacity-70 sm:text-xs">booked</span>
-                </div>
-                <div className="flex items-center gap-0.5">
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-skyBlue" />
-                  <span className="font-body text-[10px] opacity-70 sm:text-xs">light</span>
-                </div>
-              </div>
-            </div>
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-0.5 sm:gap-1">
+          <button
+            type="button"
+            className={iconBtnBase}
+            aria-label={
+              calendarView === "week" ? "Previous week" : calendarView === "day" ? "Previous day" : "Previous month"
+            }
+            disabled={busy}
+            onClick={() => {
+              setMonthPickerOpen(false);
+              setViewMenuOpen(false);
+              if (calendarView === "month") setMonthCursor((m) => addMonths(m, -1));
+              else if (calendarView === "week") setWeekCursor((w) => addDays(w, -7));
+              else if (calendarView === "day") {
+                const d = calendarDate(addDays(parseISODate(selectedDate), -1));
+                setSelectedDate(isoDate(d));
+                setMonthCursor(startOfMonth(d));
+                setWeekCursor(d);
+              }
+            }}
+          >
+            <IconChevronLeft className="h-5 w-5" />
+          </button>
+
+          <div className="flex min-w-0 max-w-[min(100%,17rem)] items-center gap-0.5">
+            <button
+              type="button"
+              className="min-w-0 max-w-full truncate rounded-xl border-0 bg-transparent px-2 py-2 text-left font-body text-base font-normal leading-tight text-slateGrey shadow-none outline-none transition select-text hover:bg-slateGrey/5 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-slateGrey/20 sm:px-2.5 sm:text-lg"
+              aria-label="Open month calendar for this period"
+              disabled={busy}
+              onClick={goToMonthlyFromTitle}
+            >
+              {headerTitle}
+            </button>
+            <button
+              type="button"
+              className={iconBtnBase}
+              aria-expanded={monthPickerOpen}
+              aria-haspopup="dialog"
+              aria-label="Scroll calendar to choose a date"
+              disabled={busy}
+              onClick={() => {
+                setViewMenuOpen(false);
+                setMonthPickerOpen((v) => !v);
+              }}
+            >
+              <IconChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className={iconBtnBase}
+            aria-label={
+              calendarView === "week" ? "Next week" : calendarView === "day" ? "Next day" : "Next month"
+            }
+            disabled={busy}
+            onClick={() => {
+              setMonthPickerOpen(false);
+              setViewMenuOpen(false);
+              if (calendarView === "month") setMonthCursor((m) => addMonths(m, 1));
+              else if (calendarView === "week") setWeekCursor((w) => addDays(w, 7));
+              else if (calendarView === "day") {
+                const d = calendarDate(addDays(parseISODate(selectedDate), 1));
+                setSelectedDate(isoDate(d));
+                setMonthCursor(startOfMonth(d));
+                setWeekCursor(d);
+              }
+            }}
+          >
+            <IconChevronRight className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div
+          className="inline-flex shrink-0 items-center gap-0.5 sm:gap-1"
+          role="group"
+          aria-label="Calendar quick actions"
+        >
+          <button
+            type="button"
+            className="inline-flex h-9 shrink-0 items-center justify-center rounded-xl border-0 bg-transparent px-2 font-body text-xs font-normal text-slateGrey shadow-none outline-none transition hover:bg-slateGrey/5 hover:shadow-sm disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-slateGrey/20 sm:px-2.5 sm:text-sm"
+            aria-label={
+              calendarView === "month"
+                ? "Go to today in month view"
+                : calendarView === "week"
+                  ? "Go to this week"
+                  : "Go to today"
+            }
+            disabled={busy}
+            onClick={jumpToTodayForView}
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            className={iconBtnBase}
+            aria-label="New booking"
+            onClick={() => {
+              setMonthPickerOpen(false);
+              setViewMenuOpen(false);
+              navigate("/calendar/new");
+            }}
+          >
+            <IconPlus className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 sm:gap-4">
 
             {calendarView === "month" && (
-              <div className="rounded-2xl border border-slateGrey/15 bg-white/35 p-1.5 sm:p-2.5">
-                <div className="grid grid-cols-7 gap-1 pb-1 sm:gap-1.5">
-                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-                    <div key={d} className="text-center font-display tracking-pepla text-[9px] uppercase opacity-70 sm:text-[10px]">
-                      {d}
-                    </div>
-                  ))}
+              <div className="-mx-1 sm:-mx-0">
+                <div className="flex border-b border-slateGrey/10 pb-2">
+                  <div className="min-w-[2.75rem] shrink-0 sm:min-w-12" aria-hidden />
+                  <div className="grid min-w-0 flex-1 grid-cols-7">
+                    {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                      <div
+                        key={`${d}-${i}`}
+                        className="text-center font-display text-[8px] font-normal uppercase tracking-[0.2em] text-slateGrey/45 sm:text-[9px]"
+                      >
+                        {d}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="grid auto-rows-[minmax(2.75rem,auto)] grid-cols-7 gap-1 sm:auto-rows-[minmax(3.5rem,auto)] sm:gap-1.5">
-                  {monthDays.map((d) => {
-                    const inMonth = d.getMonth() === monthCursor.getMonth();
-                    const k = dayKey(d);
-                    const count = monthApptCountByDay.get(k) ?? 0;
-                    const isToday = sameDay(d, new Date());
-                    const isSelected = k === selectedDate;
-                    return (
+                {Array.from({ length: monthDays.length / 7 }, (_, weekIdx) => {
+                  const rowSunday = monthDays[weekIdx * 7];
+                  const wk = isoWeekNumber(rowSunday);
+                  const wkRowGlow = hoveredMonthWeekRow === weekIdx;
+                  return (
+                    <div key={weekIdx} className="flex items-stretch border-b border-slateGrey/10 last:border-b-0">
                       <button
-                        key={k}
                         type="button"
+                        aria-label={`Open week ${wk} in weekly view`}
                         onClick={() => {
-                          setSelectedDate(k);
-                          setDetailOpen(true);
-                          const s = defaultStartForDay(d);
-                          setNewStartTime(`${String(s.getHours()).padStart(2, "0")}:${String(s.getMinutes()).padStart(2, "0")}`);
+                          const anchor = calendarDate(rowSunday);
+                          setWeekCursor(anchor);
+                          setSelectedDate(isoDate(anchor));
+                          setCalendarView("week");
                         }}
+                        onMouseEnter={() => setHoveredMonthWeekRow(weekIdx)}
+                        onMouseLeave={() => setHoveredMonthWeekRow(null)}
                         className={[
-                          "relative flex min-h-0 min-w-0 rounded-xl border text-left transition sm:rounded-2xl",
-                          inMonth ? "bg-white/55" : "bg-white/25",
-                          "border-slateGrey/15 hover:bg-white/70",
-                          isSelected ? "border-deepRed/40 bg-white/75 ring-1 ring-deepRed/20" : "",
-                          !inMonth ? "opacity-60" : ""
+                          "flex min-w-[2.75rem] max-w-[2.75rem] shrink-0 flex-col items-center justify-center self-stretch px-0.5 py-1 font-['Times_New_Roman',Times,serif] text-[10px] italic leading-tight text-slateGrey/60 transition sm:min-w-12 sm:max-w-12 sm:text-[11px]",
+                          "border-0 bg-transparent outline-none hover:bg-slateGrey/[0.06] focus-visible:ring-2 focus-visible:ring-slateGrey/25",
+                          wkRowGlow ? "bg-slateGrey/[0.07] shadow-[inset_0_0_20px_rgba(0,0,0,0.04)]" : ""
                         ].join(" ")}
                       >
-                        <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-between gap-0.5 px-1 py-1 sm:gap-1 sm:p-1.5">
-                          <div className="flex items-start justify-between gap-0">
-                            <div
+                        <span className="text-center">wk.{wk}</span>
+                      </button>
+                      <div className="grid min-w-0 flex-1 grid-cols-7 items-start">
+                        {monthDays.slice(weekIdx * 7, weekIdx * 7 + 7).map((d) => {
+                          const inMonth = d.getMonth() === monthCursor.getMonth();
+                          const k = dayKey(d);
+                          const count = monthApptCountByDay.get(k) ?? 0;
+                          const isToday = sameDay(d, new Date());
+                          const isSelected = k === selectedDate;
+                          const monthDayHoverShade =
+                            wkRowGlow || hoveredMonthDayKey === k
+                              ? "bg-slateGrey/[0.07] shadow-[inset_0_0_28px_rgba(0,0,0,0.055)]"
+                              : "";
+                          return (
+                            <button
+                              key={k}
+                              type="button"
+                              onClick={() => {
+                                setSelectedDate(k);
+                                setDetailOpen(true);
+                                const s = defaultStartForDay(d);
+                                setNewStartTime(`${String(s.getHours()).padStart(2, "0")}:${String(s.getMinutes()).padStart(2, "0")}`);
+                              }}
+                              onMouseEnter={() => setHoveredMonthDayKey(k)}
+                              onMouseLeave={() => setHoveredMonthDayKey((cur) => (cur === k ? null : cur))}
                               className={[
-                                "grid h-4 min-w-[1rem] shrink-0 place-items-center rounded-lg font-body text-[10px] leading-none sm:h-[1.125rem] sm:min-w-[1.125rem] sm:rounded-xl sm:text-[11px]",
-                                isToday ? "bg-slateGrey text-sand" : "bg-transparent"
+                                "relative flex aspect-square w-full min-w-0 flex-col items-stretch text-left outline-none transition",
+                                "border-0 bg-transparent focus-visible:ring-2 focus-visible:ring-slateGrey/20",
+                                !inMonth ? "text-slateGrey/[0.35]" : "",
+                                monthDayHoverShade
                               ].join(" ")}
                             >
-                              {d.getDate()}
-                            </div>
-                            {count > 0 && (
-                              <div className="shrink-0 rounded-full border border-slateGrey/15 bg-sand/80 px-0.5 py-px font-display tabular-nums tracking-pepla text-[8px] uppercase leading-none sm:px-1 sm:text-[9px]">
-                                {count}
-                              </div>
-                            )}
-                          </div>
+                              <div className="flex h-full min-h-0 w-full flex-col justify-between gap-1 px-1.5 pb-2 pt-2 sm:px-2 sm:pb-2.5 sm:pt-2.5">
+                                <div className="min-h-[1.25rem] self-start">
+                                  {isSelected ? (
+                                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#7C1618] font-body text-[11px] font-normal tabular-nums leading-none text-white">
+                                      {d.getDate()}
+                                    </span>
+                                  ) : isToday ? (
+                                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#2b2b2b] font-body text-[11px] font-normal tabular-nums leading-none text-white">
+                                      {d.getDate()}
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className={[
+                                        "inline-block font-body text-[11px] font-normal tabular-nums leading-none sm:text-xs",
+                                        inMonth ? "text-slateGrey/90" : "text-slateGrey/30"
+                                      ].join(" ")}
+                                    >
+                                      {d.getDate()}
+                                    </span>
+                                  )}
+                                </div>
 
-                          <div className="flex shrink-0 items-center gap-0.5">
-                            <div className="flex items-center gap-px">
-                              {apptSummaryDots(count).map((i) => (
-                                <span
-                                  key={i}
-                                  className={[
-                                    "h-1 w-1 shrink-0 rounded-full sm:h-1.5 sm:w-1.5",
-                                    i === 0 ? "bg-deepRed/90" : i === 1 ? "bg-slateGrey/50" : "bg-skyBlue"
-                                  ].join(" ")}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                                <div className="flex min-h-[0.25rem] shrink-0 items-center gap-0.5">
+                                  {apptSummaryDots(count).map((i) => (
+                                    <span
+                                      key={i}
+                                      className={[
+                                        "h-[3px] w-[3px] shrink-0 rounded-full",
+                                        i === 0 ? "bg-deepRed/50" : i === 1 ? "bg-slateGrey/30" : "bg-skyBlue/50"
+                                      ].join(" ")}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
             {calendarView === "week" && (
-              <div className="flex min-h-[7rem] flex-col items-center justify-center rounded-2xl border border-dashed border-slateGrey/25 bg-white/20 px-4 py-5 sm:min-h-[8rem]">
-                <div className="max-w-sm text-center">
-                  <div className="font-display tracking-pepla text-[10px] uppercase opacity-70 sm:text-[11px]">Week view</div>
-                  <p className="font-body mt-1 text-xs opacity-80 sm:text-sm">Week view is coming soon.</p>
+              <div
+                ref={weekScrollRef}
+                className="-mx-1 max-h-[min(32rem,calc(100vh-10rem))] overflow-auto sm:-mx-0 sm:max-h-[min(40rem,calc(100vh-11rem))]"
+              >
+                <div className="min-w-[34rem] sm:min-w-[42rem]">
+                  <div className="sticky top-0 z-30 flex border-b border-slateGrey/10 bg-sand/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-sand/90">
+                    <div className="min-w-[2.75rem] shrink-0 sm:min-w-12" aria-hidden />
+                    <div className="grid min-w-0 flex-1 grid-cols-7">
+                      {weekDays.map((d) => {
+                        const dk = isoDate(d);
+                        const isToday = sameDay(d, new Date());
+                        const letter = dowLetters[d.getDay()];
+                        const isPastCol = calendarDate(d) < calendarDate(new Date());
+                        const headerHover = hoveredWeekHeaderDayKey === dk;
+                        return (
+                          <button
+                            key={dk}
+                            type="button"
+                            aria-label={`Open ${d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })} in daily view`}
+                            onClick={() => goToDailyFromWeekHeader(d)}
+                            onMouseEnter={() => setHoveredWeekHeaderDayKey(dk)}
+                            onMouseLeave={() => setHoveredWeekHeaderDayKey((cur) => (cur === dk ? null : cur))}
+                            className={[
+                              "flex min-w-0 flex-col items-center gap-0.5 pt-2.5 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-slateGrey/20",
+                              "border-0 bg-transparent",
+                              headerHover ? "bg-slateGrey/[0.07] shadow-[inset_0_0_28px_rgba(0,0,0,0.055)]" : "",
+                              !headerHover && isPastCol ? "bg-slateGrey/[0.03]" : "",
+                              !headerHover && isToday ? "bg-[#7C1618]/[0.06]" : ""
+                            ].join(" ")}
+                          >
+                            <span className="font-display text-[8px] font-normal uppercase tracking-[0.2em] text-slateGrey/45 sm:text-[9px]">
+                              {letter}
+                            </span>
+                            <span
+                              className={[
+                                "font-body text-[11px] font-normal tabular-nums leading-none sm:text-xs",
+                                isToday ? "font-medium text-slateGrey" : "text-slateGrey/85"
+                              ].join(" ")}
+                            >
+                              {d.getDate()}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex items-stretch">
+                    <div className="sticky left-0 z-20 flex shrink-0 flex-col bg-sand/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-sand/90">
+                      {WEEK_HOUR_ROWS.map((h) => (
+                        <div
+                          key={h}
+                          className="relative box-border flex min-w-[2.75rem] max-w-[2.75rem] shrink-0 items-start justify-center self-stretch px-0.5 pt-1 sm:min-w-12 sm:max-w-12"
+                          style={{ height: WEEK_PX_PER_HOUR }}
+                        >
+                          <span className="font-display text-[8px] font-normal tabular-nums leading-none text-slateGrey/40 sm:text-[9px]">
+                            {new Date(2000, 0, 1, h, 0).toLocaleTimeString([], {
+                              hour: "numeric"
+                            })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid min-w-0 flex-1 grid-cols-7">
+                      {weekDays.map((d) => {
+                        const k = isoDate(d);
+                        const dayAppts = apptsByDayKey.get(k) ?? [];
+                        const isPastCol = calendarDate(d) < calendarDate(new Date());
+                        const isTodayCol = sameDay(d, new Date());
+                        return (
+                          <div
+                            key={k}
+                            className={["relative min-w-0", isPastCol ? "bg-slateGrey/[0.03]" : ""].join(" ")}
+                            style={weekColumnGuideStyle}
+                          >
+                            {nowLineOffsetPx != null && isTodayCol && (
+                              <div
+                                className="pointer-events-none absolute left-0 right-0 z-[25] flex items-center"
+                                style={{ top: nowLineOffsetPx }}
+                              >
+                                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#7C1618]" aria-hidden />
+                                <span className="h-px min-w-0 flex-1 bg-[#7C1618]/75" />
+                              </div>
+                            )}
+
+                            <button
+                              type="button"
+                              aria-label={`Choose a time on ${d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}`}
+                              className="absolute inset-0 z-[1] w-full cursor-crosshair border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slateGrey/25"
+                              onMouseMove={(e) => {
+                                const { top, height } = weekSlotFromOffsetY(e.nativeEvent.offsetY, durationMins);
+                                setWeekSlotHover({ k, top, height });
+                              }}
+                              onMouseLeave={() => setWeekSlotHover((h) => (h?.k === k ? null : h))}
+                              onClick={(e) => {
+                                const { startMinFromGrid } = weekSlotFromOffsetY(e.nativeEvent.offsetY, durationMins);
+                                openWeekSlotForDay(d, startMinFromGrid);
+                              }}
+                            >
+                              {weekSlotHover?.k === k && (
+                                <div
+                                  className="pointer-events-none absolute inset-x-1 bg-slateGrey/[0.07] shadow-[inset_0_0_28px_rgba(0,0,0,0.055)] sm:inset-x-1.5"
+                                  style={{ top: weekSlotHover.top, height: weekSlotHover.height }}
+                                  aria-hidden
+                                />
+                              )}
+                            </button>
+
+                            <div className="pointer-events-none absolute inset-0 z-[2] mx-1 sm:mx-1.5">
+                              {dayAppts.map((a) => {
+                                const layout = layoutApptInWeekGrid(a);
+                                if (!layout) return null;
+                                const v = weekApptVariant(a.id);
+                                return (
+                                  <button
+                                    key={a.id}
+                                    type="button"
+                                    style={{ top: layout.top, height: layout.height }}
+                                    className={[
+                                      "pointer-events-auto absolute left-0 right-0 flex min-h-0 flex-col overflow-hidden rounded-md px-1.5 py-1 text-left shadow-sm transition hover:brightness-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C1618]/35",
+                                      v === "solid"
+                                        ? "bg-[#7C1618] text-white"
+                                        : "border border-[#7C1618]/25 bg-white/80 text-[#7C1618]"
+                                    ].join(" ")}
+                                    onMouseEnter={() => setWeekSlotHover((h) => (h?.k === k ? null : h))}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openWeekAppt(a);
+                                    }}
+                                  >
+                                    <span className="truncate font-body text-[10px] font-normal leading-tight sm:text-[11px]">
+                                      {a.customerName}
+                                    </span>
+                                    <span
+                                      className={[
+                                        "truncate font-body text-[9px] font-normal tabular-nums leading-tight",
+                                        v === "solid" ? "text-white/85" : "text-slateGrey/70"
+                                      ].join(" ")}
+                                    >
+                                      {new Date(a.startISO).toLocaleTimeString([], {
+                                        hour: "numeric",
+                                        minute: "2-digit"
+                                      })}
+                                    </span>
+                                    {a.notes && (
+                                      <span
+                                        className={[
+                                          "mt-0.5 line-clamp-2 font-body text-[8px] font-normal leading-snug sm:text-[9px]",
+                                          v === "solid" ? "text-white/75" : "text-slateGrey/60"
+                                        ].join(" ")}
+                                      >
+                                        {a.notes}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
             {calendarView === "day" && (
-              <div className="flex min-h-[7rem] flex-col items-center justify-center rounded-2xl border border-dashed border-slateGrey/25 bg-white/20 px-4 py-5 sm:min-h-[8rem]">
-                <div className="max-w-sm text-center">
-                  <div className="font-display tracking-pepla text-[10px] uppercase opacity-70 sm:text-[11px]">Day view</div>
-                  <p className="font-body mt-1 text-xs opacity-80 sm:text-sm">Day view is coming soon.</p>
+                <div
+                  ref={weekScrollRef}
+                  className="-mx-1 max-h-[min(32rem,calc(100vh-10rem))] overflow-auto sm:-mx-0 sm:max-h-[min(40rem,calc(100vh-11rem))]"
+                >
+                  <div className="mx-auto min-w-[18rem] max-w-xl">
+                    <div className="sticky top-0 z-30 flex border-b border-slateGrey/10 bg-sand/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-sand/90">
+                      <div className="min-w-[2.75rem] shrink-0 sm:min-w-12" aria-hidden />
+                      <div className="grid min-w-0 flex-1 grid-cols-1">
+                        <button
+                          type="button"
+                          onClick={() => openWeekDayColumn(dayViewGrid.d)}
+                          className={[
+                            "flex min-w-0 flex-col items-center gap-0.5 pt-2.5 text-center outline-none transition hover:bg-slateGrey/[0.04] focus-visible:ring-2 focus-visible:ring-slateGrey/20",
+                            "border-0 bg-transparent",
+                            dayViewGrid.isPastCol ? "bg-slateGrey/[0.03]" : "",
+                            dayViewGrid.isTodayCol ? "bg-[#7C1618]/[0.06]" : ""
+                          ].join(" ")}
+                        >
+                          <span className="font-display text-[8px] font-normal uppercase tracking-[0.2em] text-slateGrey/45 sm:text-[9px]">
+                            {dowLetters[dayViewGrid.d.getDay()]}
+                          </span>
+                          <span
+                            className={[
+                              "font-body text-[11px] font-normal tabular-nums leading-none sm:text-xs",
+                              dayViewGrid.isTodayCol ? "font-medium text-slateGrey" : "text-slateGrey/85"
+                            ].join(" ")}
+                          >
+                            {dayViewGrid.d.getDate()}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-stretch">
+                      <div className="sticky left-0 z-20 flex shrink-0 flex-col bg-sand/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-sand/90">
+                        {WEEK_HOUR_ROWS.map((h) => (
+                          <div
+                            key={h}
+                            className="relative box-border flex min-w-[2.75rem] max-w-[2.75rem] shrink-0 items-start justify-center self-stretch px-0.5 pt-1 sm:min-w-12 sm:max-w-12"
+                            style={{ height: WEEK_PX_PER_HOUR }}
+                          >
+                            <span className="font-display text-[8px] font-normal tabular-nums leading-none text-slateGrey/40 sm:text-[9px]">
+                              {new Date(2000, 0, 1, h, 0).toLocaleTimeString([], {
+                                hour: "numeric"
+                              })}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="grid min-w-0 flex-1 grid-cols-1">
+                        <div
+                          className={["relative min-w-0", dayViewGrid.isPastCol ? "bg-slateGrey/[0.03]" : ""].join(" ")}
+                          style={weekColumnGuideStyle}
+                        >
+                          {nowLineOffsetPx != null && dayViewGrid.isTodayCol && (
+                            <div
+                              className="pointer-events-none absolute left-0 right-0 z-[25] flex items-center"
+                              style={{ top: nowLineOffsetPx }}
+                            >
+                              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#7C1618]" aria-hidden />
+                              <span className="h-px min-w-0 flex-1 bg-[#7C1618]/75" />
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            aria-label={`Choose a time on ${dayViewGrid.d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}`}
+                            className="absolute inset-0 z-[1] w-full cursor-crosshair border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slateGrey/25"
+                            onMouseMove={(e) => {
+                              const { top, height } = weekSlotFromOffsetY(e.nativeEvent.offsetY, durationMins);
+                              setWeekSlotHover({ k: dayViewGrid.k, top, height });
+                            }}
+                            onMouseLeave={() => setWeekSlotHover((h) => (h?.k === dayViewGrid.k ? null : h))}
+                            onClick={(e) => {
+                              const { startMinFromGrid } = weekSlotFromOffsetY(e.nativeEvent.offsetY, durationMins);
+                              openWeekSlotForDay(dayViewGrid.d, startMinFromGrid);
+                            }}
+                          >
+                            {weekSlotHover?.k === dayViewGrid.k && (
+                              <div
+                                className="pointer-events-none absolute inset-x-1 bg-slateGrey/[0.07] shadow-[inset_0_0_28px_rgba(0,0,0,0.055)] sm:inset-x-1.5"
+                                style={{ top: weekSlotHover.top, height: weekSlotHover.height }}
+                                aria-hidden
+                              />
+                            )}
+                          </button>
+
+                          <div className="pointer-events-none absolute inset-0 z-[2] mx-1 sm:mx-1.5">
+                            {dayViewGrid.dayAppts.map((a) => {
+                              const layout = layoutApptInWeekGrid(a);
+                              if (!layout) return null;
+                              const v = weekApptVariant(a.id);
+                              return (
+                                <button
+                                  key={a.id}
+                                  type="button"
+                                  style={{ top: layout.top, height: layout.height }}
+                                  className={[
+                                    "pointer-events-auto absolute left-0 right-0 flex min-h-0 flex-col overflow-hidden rounded-md px-1.5 py-1 text-left shadow-sm transition hover:brightness-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C1618]/35",
+                                    v === "solid"
+                                      ? "bg-[#7C1618] text-white"
+                                      : "border border-[#7C1618]/25 bg-white/80 text-[#7C1618]"
+                                  ].join(" ")}
+                                  onMouseEnter={() => setWeekSlotHover((h) => (h?.k === dayViewGrid.k ? null : h))}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openWeekAppt(a);
+                                  }}
+                                >
+                                  <span className="truncate font-body text-[10px] font-normal leading-tight sm:text-[11px]">
+                                    {a.customerName}
+                                  </span>
+                                  <span
+                                    className={[
+                                      "truncate font-body text-[9px] font-normal tabular-nums leading-tight",
+                                      v === "solid" ? "text-white/85" : "text-slateGrey/70"
+                                    ].join(" ")}
+                                  >
+                                    {new Date(a.startISO).toLocaleTimeString([], {
+                                      hour: "numeric",
+                                      minute: "2-digit"
+                                    })}
+                                  </span>
+                                  {a.notes && (
+                                    <span
+                                      className={[
+                                        "mt-0.5 line-clamp-2 font-body text-[8px] font-normal leading-snug sm:text-[9px]",
+                                        v === "solid" ? "text-white/75" : "text-slateGrey/60"
+                                      ].join(" ")}
+                                    >
+                                      {a.notes}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
             )}
           </div>
-        </CardBody>
-      </Card>
+
+      {monthPickerOpen && (
+        <div
+          className="fixed inset-0 z-[35] flex items-end justify-center bg-slateGrey/30 p-4 sm:items-center sm:p-8"
+          role="presentation"
+          onMouseDown={() => setMonthPickerOpen(false)}
+        >
+          <div
+            className="flex max-h-[min(36rem,90vh)] w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-slateGrey/15 bg-sand/95 shadow-xl backdrop-blur"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="month-picker-title"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="grid shrink-0 grid-cols-3 items-center gap-1 border-b border-slateGrey/10 px-2 py-3 sm:px-3">
+              <div className="flex justify-start">
+                <button
+                  type="button"
+                  className={iconBtnBase}
+                  aria-label="Close"
+                  onClick={() => setMonthPickerOpen(false)}
+                >
+                  <IconClose className="h-5 w-5" />
+                </button>
+              </div>
+              <h2
+                id="month-picker-title"
+                className="min-w-0 truncate text-center font-body text-sm font-semibold text-slateGrey sm:text-base"
+              >
+                Select a Day
+              </h2>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="font-body text-sm font-semibold text-slateGrey underline decoration-slateGrey/50 underline-offset-4 transition hover:decoration-slateGrey"
+                  onClick={pickTodayClosePicker}
+                >
+                  Today
+                </button>
+              </div>
+            </div>
+
+            <div className="grid shrink-0 grid-cols-7 border-b border-slateGrey/10 px-2 py-2 sm:px-3">
+              {pickerDowLabels.map((label, i) => (
+                <div
+                  key={`${label}-${i}`}
+                  className="text-center font-display text-[8px] font-normal uppercase tracking-[0.2em] text-slateGrey/45 sm:text-[9px]"
+                >
+                  {label}
+                </div>
+              ))}
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2 sm:px-4">
+              {pickerMonths.map((m) => {
+                const monthKey = `${m.getFullYear()}-${m.getMonth()}`;
+                const cells = buildPickerMonthCells(m);
+                const scrollHere = sameMonth(m, parseISODate(selectedDate));
+                return (
+                  <section
+                    key={monthKey}
+                    ref={scrollHere ? activePickerMonthRef : undefined}
+                    className="pb-8 last:pb-4"
+                    aria-label={isoMonthLabel(m)}
+                  >
+                    <h3 className="py-4 text-center font-body text-base font-semibold text-slateGrey sm:text-[17px]">
+                      {isoMonthLabel(m)}
+                    </h3>
+                    <div className="grid grid-cols-7 gap-y-2 sm:gap-y-3">
+                      {cells.map((dayNum, idx) => {
+                        if (dayNum == null) {
+                          return <div key={`${monthKey}-e-${idx}`} className="aspect-square min-h-[2.25rem]" />;
+                        }
+                        const cellDate = calendarDate(new Date(m.getFullYear(), m.getMonth(), dayNum));
+                        const k = isoDate(cellDate);
+                        const isSelected = k === selectedDate;
+                        const isTodayCell = sameDay(cellDate, new Date());
+                        return (
+                          <div key={`${monthKey}-${dayNum}`} className="flex aspect-square min-h-[2.25rem] items-start justify-center pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => pickCalendarDay(m, dayNum)}
+                              className="flex h-8 w-8 items-center justify-center rounded-full font-body text-[13px] font-normal tabular-nums text-slateGrey transition hover:bg-slateGrey/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slateGrey/25 sm:h-9 sm:w-9 sm:text-sm"
+                            >
+                              {isSelected ? (
+                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#7C1618] text-[13px] leading-none text-white sm:h-9 sm:w-9 sm:text-sm">
+                                  {dayNum}
+                                </span>
+                              ) : isTodayCell ? (
+                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#2b2b2b] text-[13px] leading-none text-white sm:h-9 sm:w-9 sm:text-sm">
+                                  {dayNum}
+                                </span>
+                              ) : (
+                                dayNum
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {detailOpen && (
         <div
-          className="fixed inset-0 z-20 grid place-items-center bg-slateGrey/30 px-4"
+          className="fixed inset-0 z-[45] grid place-items-center bg-slateGrey/30 px-4"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setDetailOpen(false);
           }}

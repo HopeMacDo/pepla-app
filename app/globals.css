@@ -1,12 +1,37 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Channel triplets for Tailwind opacity modifiers (see tailwind.config.cjs). */
 :root {
-  --sand: #fdf6f3;
-  --slate-grey: #2e2c32;
-  --sky-blue: #c4cedf;
-  --deep-red: #7c1618;
+  --void: 14 14 14;
+  --ash: 28 28 28;
+  --fog: 58 58 58;
+  --dust: 138 138 138;
+  --parchment: 242 239 233;
+  --chalk: 255 255 255;
+  --sky: 196 206 223;
+  --ember: 124 22 24;
+  /* Editorial corner radius: use via Tailwind (see tailwind.config.cjs) or var(--radius) in CSS */
+  --radius: 4px;
+}
+
+@layer base {
+  body {
+    font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: "Times New Roman", Times, serif !important;
+    font-style: italic !important;
+    font-weight: 400 !important;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
 }
 
 html,
@@ -24,5 +49,5 @@ dialog.customer-modal {
 }
 
 dialog.customer-modal::backdrop {
-  background: rgba(46, 44, 50, 0.35);
+  background: rgba(14, 14, 14, 0.4);
 }

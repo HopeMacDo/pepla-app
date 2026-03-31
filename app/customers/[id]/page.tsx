@@ -9,7 +9,7 @@ import { formatSupabaseError, supabase } from "@/lib/supabase";
 
 export default function CustomerDetailPage() {
   const params = useParams();
-  const id = typeof params.id === "string" ? params.id : null;
+  const id = typeof params?.id === "string" ? params.id : null;
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);

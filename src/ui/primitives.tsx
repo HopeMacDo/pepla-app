@@ -61,9 +61,9 @@ export function Button(
   const sizes = size === "sm" ? "h-9" : "h-10";
   const variants =
     variant === "primary"
-      ? "border-slateGrey/30 bg-slateGrey text-sand hover:bg-slateGrey/90"
+      ? "border-slateGrey/30 bg-slateGrey text-chalk hover:bg-slateGrey/90"
       : variant === "danger"
-        ? "border-deepRed/40 bg-deepRed text-sand hover:brightness-95"
+        ? "border-deepRed/40 bg-deepRed text-chalk hover:brightness-95"
         : "border-slateGrey/20 bg-transparent hover:bg-slateGrey/5";
 
   return <button {...rest} className={[base, sizes, variants, className ?? ""].join(" ")} />;

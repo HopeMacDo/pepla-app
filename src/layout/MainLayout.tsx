@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -13,6 +13,7 @@ const NAV_ITEMS = [
 ] as const;
 
 export default function MainLayout() {
+  const { pathname } = useLocation();
   const sidebarLink =
     "block rounded-lg border border-transparent px-3 py-2.5 font-display text-xs uppercase tracking-pepla transition hover:border-slateGrey/15 hover:bg-white/50";
   const sidebarInactive = "text-slateGrey";
@@ -43,7 +44,12 @@ export default function MainLayout() {
             <NavLink
               key={to}
               to={to}
-              className={({ isActive }) => cx(sidebarLink, isActive ? sidebarActive : sidebarInactive)}
+              className={({ isActive }) =>
+                cx(
+                  sidebarLink,
+                  isActive || (to === "/calendar" && pathname.startsWith("/calendar")) ? sidebarActive : sidebarInactive
+                )
+              }
             >
               {label}
             </NavLink>
@@ -66,7 +72,13 @@ export default function MainLayout() {
         aria-label="Main"
       >
         {NAV_ITEMS.map(({ to, label }) => (
-          <NavLink key={to} to={to} className={({ isActive }) => cx(bottomLink, isActive && bottomActive)}>
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              cx(bottomLink, (isActive || (to === "/calendar" && pathname.startsWith("/calendar"))) && bottomActive)
+            }
+          >
             <span className="max-w-[4.5rem]">{label}</span>
           </NavLink>
         ))}

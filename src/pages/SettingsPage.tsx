@@ -90,7 +90,7 @@ const MONTHLY_REPORT = [
 function SettingsMenu() {
   const linkBase =
     "flex items-center gap-3 rounded-xl border border-slateGrey/15 bg-white/40 px-4 py-3 font-display text-xs uppercase tracking-pepla text-slateGrey transition hover:border-slateGrey/25 hover:bg-white/70";
-  const linkActive = "border-slateGrey/30 bg-slateGrey text-sand shadow-pepla hover:bg-slateGrey hover:text-sand";
+  const linkActive = "border-slateGrey/30 bg-slateGrey text-chalk shadow-pepla hover:bg-slateGrey hover:text-chalk";
 
   return (
     <nav className="space-y-1.5" aria-label="Settings sections">

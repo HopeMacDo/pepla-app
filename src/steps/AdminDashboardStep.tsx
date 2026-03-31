@@ -94,7 +94,7 @@ export default function AdminDashboardStep() {
                   className={[
                     "rounded-full border px-4 py-2 font-display text-xs uppercase tracking-pepla transition",
                     active
-                      ? "border-slateGrey/40 bg-slateGrey text-sand"
+                      ? "border-slateGrey/40 bg-slateGrey text-chalk"
                       : "border-slateGrey/20 bg-white/30 text-slateGrey hover:bg-white/60"
                   ].join(" ")}
                 >
@@ -102,7 +102,7 @@ export default function AdminDashboardStep() {
                   <span
                     className={[
                       "ml-2 inline-grid min-w-[1.5rem] place-items-center rounded-full px-1.5 py-0.5 text-[10px]",
-                      active ? "bg-sand/20 text-sand" : "bg-slateGrey/10 text-slateGrey"
+                      active ? "bg-chalk/15 text-chalk" : "bg-slateGrey/10 text-slateGrey"
                     ].join(" ")}
                   >
                     {countsByTab[tab]}

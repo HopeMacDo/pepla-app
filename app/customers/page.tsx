@@ -195,7 +195,7 @@ export default function CustomersPage() {
             disabled={loading}
             aria-label="Create new client"
             className={cn(
-              "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slateGrey/20 bg-slateGrey font-body text-xl leading-none text-sand shadow-pepla",
+              "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slateGrey/20 bg-slateGrey font-body text-xl leading-none text-chalk shadow-pepla",
               "transition hover:bg-slateGrey/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slateGrey/40 focus-visible:ring-offset-2 focus-visible:ring-offset-sand",
               "disabled:pointer-events-none disabled:opacity-50"
             )}
@@ -284,7 +284,7 @@ export default function CustomersPage() {
                 type="submit"
                 disabled={createBusy}
                 className={cn(
-                  "rounded-lg border border-slateGrey/20 bg-slateGrey px-4 py-2.5 font-display text-xs uppercase tracking-pepla text-sand shadow-pepla",
+                  "rounded-lg border border-slateGrey/20 bg-slateGrey px-4 py-2.5 font-display text-xs uppercase tracking-pepla text-chalk shadow-pepla",
                   "transition hover:bg-slateGrey/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slateGrey/40 focus-visible:ring-offset-2 focus-visible:ring-offset-sand",
                   "disabled:pointer-events-none disabled:opacity-50"
                 )}
