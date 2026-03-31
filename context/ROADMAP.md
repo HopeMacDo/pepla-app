@@ -57,3 +57,12 @@ Goal:
 
 - navigable sidepar and clickable items on each page
 
+
+Mon Mar 30
+- replace brand md file for design.v2
+- redesign calendar pages
+
+Goal:
+- clean, accessible, scrollable calendars
+- Clickable days/weeks with view navigation
+- month/week nav buttons, hover effects, and fast-scroll date dropdown

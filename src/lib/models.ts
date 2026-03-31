@@ -57,9 +57,12 @@ export const AppointmentSchema = z.object({
   id: z.string(),
   startISO: z.string(),
   endISO: z.string(),
+  kind: z.enum(["appointment", "block"]).default("appointment"),
   customerId: z.string().optional(),
   customerName: z.string().min(1),
   phoneNumber: z.string().optional(),
+  serviceName: z.string().optional(),
+  price: z.number().nonnegative().optional(),
   notes: z.string().optional()
 });
 export type Appointment = z.infer<typeof AppointmentSchema>;

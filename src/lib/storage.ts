@@ -196,6 +196,7 @@ async function finalizeProposalBookingFromRow(row: IntakeRequest): Promise<Final
 
   const appt: Appointment = {
     id: crypto.randomUUID(),
+    kind: "appointment",
     startISO: start.toISOString(),
     endISO: end.toISOString(),
     customerId: row.id,
