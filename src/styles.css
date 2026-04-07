@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&family=Great+Vibes&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -10,11 +10,13 @@
   --ash: 28 28 28;
   --fog: 58 58 58;
   --dust: 138 138 138;
-  --parchment: 242 239 233;
   --chalk: 255 255 255;
   --sky: 196 206 223;
   --ember: 124 22 24;
   --radius: 4px;
+  /* Semantic aliases (inbox + forms) */
+  --color-border-tertiary: rgb(var(--void) / 0.12);
+  --color-background-secondary: rgb(var(--sky) / 0.42);
 }
 
 @layer base {

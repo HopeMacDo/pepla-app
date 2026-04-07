@@ -29,7 +29,7 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...rest}
       className={[
-        "w-full rounded-xl border border-slateGrey/20 bg-sand/40 px-3 py-2 font-body text-[15px] outline-none focus:border-slateGrey/40",
+        "w-full rounded-xl border border-slateGrey/20 bg-slateGrey/5 px-3 py-2 font-body text-[15px] outline-none focus:border-slateGrey/40",
         className ?? ""
       ].join(" ")}
     />
@@ -42,7 +42,7 @@ export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement
     <textarea
       {...rest}
       className={[
-        "w-full min-h-[120px] resize-y rounded-xl border border-slateGrey/20 bg-sand/40 px-3 py-2 font-body text-[15px] outline-none focus:border-slateGrey/40",
+        "w-full min-h-[120px] resize-y rounded-xl border border-slateGrey/20 bg-slateGrey/5 px-3 py-2 font-body text-[15px] outline-none focus:border-slateGrey/40",
         className ?? ""
       ].join(" ")}
     />
@@ -61,7 +61,7 @@ export function Button(
   const sizes = size === "sm" ? "h-9" : "h-10";
   const variants =
     variant === "primary"
-      ? "border-slateGrey/30 bg-slateGrey text-chalk hover:bg-slateGrey/90"
+      ? "border-sky/45 bg-sky text-slateGrey shadow-pepla hover:bg-sky/85"
       : variant === "danger"
         ? "border-deepRed/40 bg-deepRed text-chalk hover:brightness-95"
         : "border-slateGrey/20 bg-transparent hover:bg-slateGrey/5";

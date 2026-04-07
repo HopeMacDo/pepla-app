@@ -66,3 +66,11 @@ Goal:
 - clean, accessible, scrollable calendars
 - Clickable days/weeks with view navigation
 - month/week nav buttons, hover effects, and fast-scroll date dropdown
+
+
+Tue Mar 31
+- Refactor booking pop-up on calendar for manual bookings
+
+Goal:
+- intuitive booking and calendar blocks
+- minimalist booking pages with client search and smart times

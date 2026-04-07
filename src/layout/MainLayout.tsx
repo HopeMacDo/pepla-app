@@ -18,26 +18,23 @@ export default function MainLayout() {
     "block rounded-lg border border-transparent px-3 py-2.5 font-display text-xs uppercase tracking-pepla transition hover:border-slateGrey/15 hover:bg-white/50";
   const sidebarInactive = "text-slateGrey";
   const sidebarActive =
-    "border-slateGrey/20 bg-slateGrey text-white shadow-pepla hover:bg-slateGrey hover:text-white";
+    "border-sky/50 bg-sky text-slateGrey shadow-pepla hover:bg-sky/90 hover:text-slateGrey";
   const bottomLink =
     "flex min-h-[3.25rem] flex-1 flex-col items-center justify-center px-1.5 py-2 text-center font-display text-[10px] uppercase tracking-pepla leading-tight text-slateGrey transition sm:text-xs";
-  const bottomActive = "bg-white/65 text-slateGrey";
+  const bottomActive = "bg-sky/90 text-slateGrey";
 
   return (
-    <div className="min-h-screen bg-sand text-slateGrey">
+    <div className="min-h-screen bg-chalk text-slateGrey">
       <aside
         className={cx(
-          "fixed left-0 top-0 z-20 flex h-screen w-56 flex-col border-r border-slateGrey/15 bg-sand/95 backdrop-blur",
-          "supports-[backdrop-filter]:bg-sand/80",
+          "fixed left-0 top-0 z-20 flex h-screen w-56 flex-col border-r border-slateGrey/15 bg-chalk/95 backdrop-blur",
+          "supports-[backdrop-filter]:bg-chalk/80",
           "hidden sm:flex"
         )}
       >
-        <div className="flex shrink-0 items-center gap-3 border-b border-slateGrey/15 px-4 py-4">
-          <img src="/logo.svg" alt="Pepla" className="h-8 w-auto" />
-          <div className="min-w-0 leading-tight">
-            <div className="font-display text-xs uppercase tracking-pepla">Pepla</div>
-            <div className="font-body text-sm opacity-80">Booking</div>
-          </div>
+        <div className="flex h-[60px] shrink-0 items-center gap-3 border-b border-slateGrey/15 px-4">
+          <img src="/logo.svg" alt="Pepla" className="h-8 w-auto shrink-0" />
+          <img src="/pepla.svg" alt="Pepla" className="h-auto max-h-[48px] w-auto" />
         </div>
         <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-3" aria-label="Main">
           {NAV_ITEMS.map(({ to, label }) => (
@@ -47,7 +44,11 @@ export default function MainLayout() {
               className={({ isActive }) =>
                 cx(
                   sidebarLink,
-                  isActive || (to === "/calendar" && pathname.startsWith("/calendar")) ? sidebarActive : sidebarInactive
+                  isActive ||
+                    (to === "/calendar" && pathname.startsWith("/calendar")) ||
+                    (to === "/settings" && pathname.startsWith("/settings"))
+                    ? sidebarActive
+                    : sidebarInactive
                 )
               }
             >
@@ -65,8 +66,8 @@ export default function MainLayout() {
 
       <nav
         className={cx(
-          "fixed bottom-0 left-0 right-0 z-20 flex border-t border-slateGrey/15 bg-sand/95 backdrop-blur pb-[env(safe-area-inset-bottom)]",
-          "supports-[backdrop-filter]:bg-sand/80",
+          "fixed bottom-0 left-0 right-0 z-20 flex border-t border-slateGrey/15 bg-chalk/95 backdrop-blur pb-[env(safe-area-inset-bottom)]",
+          "supports-[backdrop-filter]:bg-chalk/80",
           "sm:hidden"
         )}
         aria-label="Main"
@@ -76,7 +77,13 @@ export default function MainLayout() {
             key={to}
             to={to}
             className={({ isActive }) =>
-              cx(bottomLink, (isActive || (to === "/calendar" && pathname.startsWith("/calendar"))) && bottomActive)
+              cx(
+                bottomLink,
+                (isActive ||
+                  (to === "/calendar" && pathname.startsWith("/calendar")) ||
+                  (to === "/settings" && pathname.startsWith("/settings"))) &&
+                  bottomActive
+              )
             }
           >
             <span className="max-w-[4.5rem]">{label}</span>

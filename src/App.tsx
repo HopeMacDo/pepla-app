@@ -2,12 +2,11 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearch
 import { useEffect, useMemo } from "react";
 
 import MainLayout from "./layout/MainLayout";
-import SettingsPage, {
-  SettingsHomeSection,
-  SettingsNotificationsSection,
-  SettingsReportsSection,
-  SettingsTransactionsSection
-} from "./pages/SettingsPage";
+import SettingsPage, { SettingsSectionPage } from "./pages/SettingsPage";
+import FormDetailPage from "./pages/FormDetailPage";
+import FormEditorPage from "./pages/FormEditorPage";
+import FormPreviewTab from "./pages/FormPreviewTab";
+import FormSubmissionsTab from "./pages/FormSubmissionsTab";
 import TodayPage from "./pages/TodayPage";
 import IntakeStep from "./steps/IntakeStep";
 import CalendarStep from "./steps/CalendarStep";
@@ -99,7 +98,7 @@ export default function App() {
       <Route
         path="/intake"
         element={
-          <div className="min-h-screen bg-sand text-slateGrey">
+          <div className="min-h-screen bg-chalk text-slateGrey">
             <div className="mx-auto max-w-5xl px-4 py-8">
               <IntakeStep />
             </div>
@@ -118,13 +117,16 @@ export default function App() {
         <Route path="/calendar/block" element={<CalendarBlockTimePage />} />
         <Route path="/customers" element={<CustomersListStep />} />
         <Route path="/customers/:id" element={<CustomerDetailStep />} />
-        <Route path="/settings" element={<SettingsPage />}>
-          <Route index element={<SettingsHomeSection />} />
-          <Route path="transactions" element={<SettingsTransactionsSection />} />
-          <Route path="notifications" element={<SettingsNotificationsSection />} />
-          <Route path="reports" element={<SettingsReportsSection />} />
-        </Route>
         <Route path="/settings/intake/:id" element={<RedirectLegacySettingsIntake />} />
+        <Route path="/settings/forms/new" element={<FormEditorPage />} />
+        <Route path="/settings/forms/:formId" element={<FormDetailPage />}>
+          <Route index element={<Navigate to="submissions" replace />} />
+          <Route path="submissions" element={<FormSubmissionsTab />} />
+          <Route path="preview" element={<FormPreviewTab />} />
+          <Route path="edit" element={<FormEditorPage />} />
+        </Route>
+        <Route path="/settings/:section" element={<SettingsSectionPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/today" replace />} />

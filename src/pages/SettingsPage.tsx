@@ -1,4 +1,5 @@
-import { NavLink, Outlet, useMatch } from "react-router-dom";
+import { NavLink, Navigate, useNavigate, useParams } from "react-router-dom";
+import { listSavedForms } from "../lib/savedForms";
 import { Card, CardBody, CardHeader } from "../ui/primitives";
 
 function cx(...parts: Array<string | false | null | undefined>) {
@@ -34,6 +35,19 @@ const MENU = [
     icon: (
       <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+      </svg>
+    )
+  },
+  {
+    to: "forms",
+    label: "Forms",
+    icon: (
+      <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+        />
       </svg>
     )
   }
@@ -90,12 +104,16 @@ const MONTHLY_REPORT = [
 function SettingsMenu() {
   const linkBase =
     "flex items-center gap-3 rounded-xl border border-slateGrey/15 bg-white/40 px-4 py-3 font-display text-xs uppercase tracking-pepla text-slateGrey transition hover:border-slateGrey/25 hover:bg-white/70";
-  const linkActive = "border-slateGrey/30 bg-slateGrey text-chalk shadow-pepla hover:bg-slateGrey hover:text-chalk";
+  const linkActive = "border-sky/50 bg-sky text-slateGrey shadow-pepla hover:bg-sky/90 hover:text-slateGrey";
 
   return (
     <nav className="space-y-1.5" aria-label="Settings sections">
       {MENU.map(({ to, label, icon }) => (
-        <NavLink key={to} to={to} className={({ isActive }) => cx(linkBase, isActive && linkActive)} end={false}>
+        <NavLink
+          key={to}
+          to={`/settings/${to}`}
+          className={({ isActive }) => cx(linkBase, isActive && linkActive)}
+        >
           {icon}
           {label}
         </NavLink>
@@ -163,7 +181,7 @@ export function SettingsNotificationsSection() {
         <p className="mt-1 font-body text-sm text-slateGrey/65">Recent alerts tied to your calendar (demo data).</p>
       </CardHeader>
       <CardBody className="space-y-3 pt-0">
-        <ul className="divide-y divide-slateGrey/10 rounded-xl border border-slateGrey/15 bg-sand/30">
+        <ul className="divide-y divide-slateGrey/10 rounded-xl border border-slateGrey/15 bg-slateGrey/5">
           {NOTIFICATION_ITEMS.map((n) => (
             <li key={n.id} className="flex gap-3 px-4 py-3 first:rounded-t-xl last:rounded-b-xl">
               <span
@@ -185,6 +203,26 @@ export function SettingsNotificationsSection() {
         </ul>
       </CardBody>
     </Card>
+  );
+}
+
+export function SettingsFormsSection() {
+  const forms = listSavedForms();
+
+  if (forms.length === 0) return null;
+
+  const cardBase =
+    "flex w-full min-w-0 items-center rounded-xl border border-slateGrey/15 bg-white/40 px-4 py-3 font-display text-xs uppercase tracking-pepla text-slateGrey transition hover:border-slateGrey/25 hover:bg-white/70";
+  const cardActive = "border-sky/50 bg-sky text-slateGrey shadow-pepla hover:bg-sky/90 hover:text-slateGrey";
+
+  return (
+    <nav className="max-w-md space-y-1.5" aria-label="Saved forms">
+      {forms.map((f) => (
+        <NavLink key={f.id} to={`/settings/forms/${f.id}`} className={({ isActive }) => cx(cardBase, isActive && cardActive)}>
+          <span className="min-w-0 truncate">{f.name.trim() || "Untitled form"}</span>
+        </NavLink>
+      ))}
+    </nav>
   );
 }
 
@@ -221,7 +259,7 @@ export function SettingsReportsSection() {
 
         <div>
           <p className="mb-4 font-display text-[11px] uppercase tracking-pepla text-slateGrey/55">Detail</p>
-          <div className="overflow-x-auto rounded-xl border border-slateGrey/15 bg-sand/30">
+          <div className="overflow-x-auto rounded-xl border border-slateGrey/15 bg-slateGrey/5">
             <table className="w-full min-w-[20rem] border-collapse text-left font-body text-sm">
               <thead>
                 <tr className="border-b border-slateGrey/15 text-[11px] uppercase tracking-pepla text-slateGrey/55">
@@ -258,34 +296,76 @@ export function SettingsReportsSection() {
   );
 }
 
-/** Index route: no detail panel; layout hides the outlet column on `/settings`. */
-export function SettingsHomeSection() {
-  return null;
-}
+/** Full-page route for each settings area (same pattern as `/calendar/new`). */
+export function SettingsSectionPage() {
+  const { section } = useParams<{ section: string }>();
+  const navigate = useNavigate();
 
-export default function SettingsPage() {
-  const atSettingsRoot = useMatch({ path: "/settings", end: true });
+  const config = (() => {
+    switch (section) {
+      case "transactions":
+        return { title: "Transactions", panel: <SettingsTransactionsSection /> };
+      case "notifications":
+        return { title: "Notifications", panel: <SettingsNotificationsSection /> };
+      case "reports":
+        return { title: "Reports", panel: <SettingsReportsSection /> };
+      case "forms":
+        return { title: "Forms", panel: <SettingsFormsSection /> };
+      default:
+        return null;
+    }
+  })();
+
+  if (!config) return <Navigate to="/settings" replace />;
+
+  const isForms = section === "forms";
+  const iconBtnClass = isForms
+    ? "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slateGrey transition hover:bg-slateGrey/5"
+    : "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slateGrey/20 text-slateGrey transition hover:bg-slateGrey/5";
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="font-display text-2xl uppercase tracking-pepla text-slateGrey sm:text-3xl">Settings</h1>
-        <p className="mt-1 max-w-xl font-body text-sm text-slateGrey/65">Manage reports, money movement, and alerts.</p>
-      </header>
-
-      <div
-        className={cx(
-          "flex flex-col gap-6 lg:items-start",
-          atSettingsRoot ? "" : "lg:flex-row"
-        )}
-      >
-        <aside className={cx("shrink-0", atSettingsRoot ? "w-full max-w-sm" : "lg:w-56")}>
-          <SettingsMenu />
-        </aside>
-        <div className={cx("min-w-0", atSettingsRoot ? "hidden" : "flex-1")}>
-          <Outlet />
-        </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className={iconBtnClass}
+          aria-label="Back to settings"
+          onClick={() => navigate("/settings")}
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+          </svg>
+        </button>
+        <h1 className={cx("font-display text-2xl tracking-pepla text-slateGrey sm:text-3xl", isForms && "min-w-0 flex-1")}>
+          {config.title}
+        </h1>
+        {isForms ? (
+          <button
+            type="button"
+            className={iconBtnClass}
+            aria-label="New form"
+            onClick={() => navigate("/settings/forms/new")}
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+          </button>
+        ) : null}
       </div>
+      {config.panel}
+    </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="font-display text-2xl tracking-pepla text-slateGrey sm:text-3xl">Settings</h1>
+      </header>
+      <nav className="max-w-md" aria-label="Settings sections">
+        <SettingsMenu />
+      </nav>
     </div>
   );
 }

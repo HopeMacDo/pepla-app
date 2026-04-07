@@ -173,11 +173,11 @@ export default function CustomersListStep() {
   }, [rows, query]);
 
   return (
-    <div className="flex max-h-[min(100vh-10rem,52rem)] flex-col overflow-hidden rounded-2xl border border-slateGrey/15 bg-sand text-slateGrey shadow-pepla">
+    <div className="flex max-h-[min(100vh-10rem,52rem)] flex-col overflow-hidden rounded-2xl border border-slateGrey/15 bg-chalk text-slateGrey shadow-pepla">
       <header
         className={cn(
-          "shrink-0 border-b border-slateGrey/15 bg-sand/95 px-4 py-3 backdrop-blur",
-          "supports-[backdrop-filter]:bg-sand/80"
+          "shrink-0 border-b border-slateGrey/15 bg-chalk/95 px-4 py-3 backdrop-blur",
+          "supports-[backdrop-filter]:bg-chalk/80"
         )}
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
@@ -200,8 +200,8 @@ export default function CustomersListStep() {
             disabled={loading}
             aria-label="Create new client"
             className={cn(
-              "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slateGrey/20 bg-slateGrey font-body text-xl leading-none text-chalk shadow-pepla",
-              "transition hover:bg-slateGrey/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slateGrey/40 focus-visible:ring-offset-2 focus-visible:ring-offset-sand",
+              "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-sky/45 bg-sky font-body text-xl leading-none text-slateGrey shadow-pepla",
+              "transition hover:bg-sky/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky/45 focus-visible:ring-offset-2 focus-visible:ring-offset-chalk",
               "disabled:pointer-events-none disabled:opacity-50"
             )}
           >
@@ -219,7 +219,7 @@ export default function CustomersListStep() {
         }}
       >
         <div
-          className="rounded-2xl border border-slateGrey/15 bg-sand p-6 shadow-pepla"
+          className="rounded-2xl border border-slateGrey/15 bg-chalk p-6 shadow-pepla"
           onClick={(e) => e.stopPropagation()}
         >
           <h2 id="create-client-title" className="font-body text-lg font-bold text-slateGrey">
@@ -289,8 +289,8 @@ export default function CustomersListStep() {
                 type="submit"
                 disabled={createBusy}
                 className={cn(
-                  "rounded-lg border border-slateGrey/20 bg-slateGrey px-4 py-2.5 font-display text-xs uppercase tracking-pepla text-chalk shadow-pepla",
-                  "transition hover:bg-slateGrey/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slateGrey/40 focus-visible:ring-offset-2 focus-visible:ring-offset-sand",
+                  "rounded-lg border border-sky/45 bg-sky px-4 py-2.5 font-display text-xs uppercase tracking-pepla text-slateGrey shadow-pepla",
+                  "transition hover:bg-sky/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky/45 focus-visible:ring-offset-2 focus-visible:ring-offset-chalk",
                   "disabled:pointer-events-none disabled:opacity-50"
                 )}
               >

@@ -51,7 +51,7 @@ export default function CustomerDetailPage() {
   }, [id]);
 
   return (
-    <div className="min-h-screen bg-sand px-4 py-8 text-slateGrey">
+    <div className="min-h-screen bg-chalk px-4 py-8 text-slateGrey">
       <div className="mx-auto max-w-lg">
         <Link
           href="/customers"

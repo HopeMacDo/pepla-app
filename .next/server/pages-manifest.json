@@ -1,8 +1,10 @@
 {
   "/_error": "pages/_error.js",
-  "/SettingsPage": "pages/SettingsPage.js",
-  "/TodayPage": "pages/TodayPage.js",
+  "/CalendarNewBookingPage": "pages/CalendarNewBookingPage.js",
   "/PlaceholderPage": "pages/PlaceholderPage.js",
   "/_app": "pages/_app.js",
+  "/CalendarBlockTimePage": "pages/CalendarBlockTimePage.js",
+  "/TodayPage": "pages/TodayPage.js",
+  "/SettingsPage": "pages/SettingsPage.js",
   "/_document": "pages/_document.js"
 }

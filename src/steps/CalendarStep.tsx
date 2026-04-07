@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Input, Label, Textarea } from "../ui/primitives";
+import { ScrollingMonthCalendarDialog } from "../ui/ScrollingMonthCalendarDialog";
 import type { Appointment } from "../lib/models";
 import { deleteAppointment, listAppointments, putAppointment } from "../lib/storage";
 
@@ -150,19 +151,6 @@ function buildMonthGrid(month: Date) {
   return days;
 }
 
-/** Single-month grid for picker: leading/trailing empty slots, no adjacent-month dates. */
-function buildPickerMonthCells(monthAnchor: Date): (number | null)[] {
-  const first = startOfMonth(monthAnchor);
-  const lastDay = endOfMonth(monthAnchor).getDate();
-  const lead = first.getDay();
-  const cells: (number | null)[] = [];
-  for (let i = 0; i < lead; i++) cells.push(null);
-  for (let d = 1; d <= lastDay; d++) cells.push(d);
-  const trail = (7 - (cells.length % 7)) % 7;
-  for (let i = 0; i < trail; i++) cells.push(null);
-  return cells;
-}
-
 /** ISO 8601 week number (1–53) for the local calendar date. */
 function isoWeekNumber(dt: Date): number {
   const t = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
@@ -192,13 +180,6 @@ const VIEW_OPTIONS: { id: CalendarViewMode; label: string }[] = [
   { id: "week", label: "Weekly" },
   { id: "day", label: "Daily" }
 ];
-
-const MONTH_PICKER_PAST = 48;
-const MONTH_PICKER_FUTURE = 72;
-
-function sameMonth(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-}
 
 const iconBtnBase =
   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border-0 bg-transparent text-slateGrey shadow-none outline-none transition hover:bg-slateGrey/5 hover:shadow-sm disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-slateGrey/20";
@@ -245,14 +226,6 @@ function IconDotsVertical({ className }: { className?: string }) {
   );
 }
 
-function IconClose({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  );
-}
-
 export default function CalendarStep() {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
@@ -275,7 +248,6 @@ export default function CalendarStep() {
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const slotMenuRef = useRef<HTMLDivElement>(null);
-  const activePickerMonthRef = useRef<HTMLDivElement | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => isoDate(new Date()));
   const [customerName, setCustomerName] = useState(() => sp.get("name") ?? "");
   const [phoneNumber, setPhoneNumber] = useState(() => sp.get("phone") ?? "");
@@ -377,15 +349,6 @@ export default function CalendarStep() {
     })();
   }, []);
 
-  const pickerMonths = useMemo(() => {
-    const start = startOfMonth(new Date());
-    const list: Date[] = [];
-    for (let i = -MONTH_PICKER_PAST; i <= MONTH_PICKER_FUTURE; i++) {
-      list.push(addMonths(start, i));
-    }
-    return list;
-  }, []);
-
   useEffect(() => {
     if (!viewMenuOpen) return;
     function onDoc(e: MouseEvent) {
@@ -429,14 +392,6 @@ export default function CalendarStep() {
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [slotMenu?.open]);
-
-  useEffect(() => {
-    if (!monthPickerOpen) return;
-    const id = requestAnimationFrame(() => {
-      activePickerMonthRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
-    });
-    return () => cancelAnimationFrame(id);
-  }, [monthPickerOpen, selectedDate]);
 
   const apptsForDay = useMemo(() => {
     const day = parseISODate(selectedDate);
@@ -643,22 +598,6 @@ export default function CalendarStep() {
     setDetailOpen(true);
   }
 
-  function pickCalendarDay(monthFirst: Date, dayNum: number) {
-    const d = calendarDate(new Date(monthFirst.getFullYear(), monthFirst.getMonth(), dayNum));
-    setSelectedDate(isoDate(d));
-    setMonthCursor(startOfMonth(d));
-    setWeekCursor(d);
-    setMonthPickerOpen(false);
-  }
-
-  function pickTodayClosePicker() {
-    const today = calendarDate(new Date());
-    setSelectedDate(isoDate(today));
-    setMonthCursor(startOfMonth(today));
-    setWeekCursor(today);
-    setMonthPickerOpen(false);
-  }
-
   /** Jump to today: month grid shows this month, week strip shows this week, day uses today as selected date. */
   function jumpToTodayForView() {
     const today = calendarDate(new Date());
@@ -681,8 +620,6 @@ export default function CalendarStep() {
     setCalendarView("month");
   }
 
-  const pickerDowLabels = ["S", "M", "T", "W", "T", "F", "S"];
-
   return (
     <div className="mx-auto w-full max-w-5xl px-4 pb-6 pt-4 sm:px-6 sm:pb-8 sm:pt-5">
       <div className="mb-3 flex items-center gap-2 sm:mb-4">
@@ -702,7 +639,7 @@ export default function CalendarStep() {
           </button>
           {viewMenuOpen && (
             <div
-              className="absolute left-0 top-full z-40 mt-1 w-48 overflow-hidden rounded-xl border border-slateGrey/15 bg-sand/95 py-1 shadow-lg backdrop-blur"
+              className="absolute left-0 top-full z-40 mt-1 w-48 overflow-hidden rounded-xl border border-slateGrey/15 bg-chalk/95 py-1 shadow-lg backdrop-blur"
               role="menu"
               aria-label="Choose calendar view"
             >
@@ -768,7 +705,7 @@ export default function CalendarStep() {
           <div className="flex min-w-0 max-w-[min(100%,17rem)] items-center gap-0.5">
             <button
               type="button"
-              className="min-w-0 max-w-full truncate rounded-xl border-0 bg-transparent px-2 py-2 text-left font-body text-base font-normal leading-tight text-slateGrey shadow-none outline-none transition select-text hover:bg-slateGrey/5 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-slateGrey/20 sm:px-2.5 sm:text-lg"
+              className="min-w-0 max-w-full truncate rounded-xl border-0 bg-transparent px-2 py-2 text-left font-['Times_New_Roman',Times,serif] text-base font-normal italic leading-tight text-slateGrey shadow-none outline-none transition select-text hover:bg-slateGrey/5 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-slateGrey/20 sm:px-2.5 sm:text-lg"
               aria-label="Open month calendar for this period"
               disabled={busy}
               onClick={goToMonthlyFromTitle}
@@ -852,7 +789,7 @@ export default function CalendarStep() {
             </button>
             {plusMenuOpen && (
               <div
-                className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-xl border border-slateGrey/15 bg-sand/95 py-1 shadow-lg backdrop-blur"
+                className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-xl border border-slateGrey/15 bg-chalk/95 py-1 shadow-lg backdrop-blur"
                 role="menu"
                 aria-label="Create menu"
               >
@@ -895,7 +832,7 @@ export default function CalendarStep() {
       {slotMenu?.open && (
         <div
           ref={slotMenuRef}
-          className="fixed z-50 w-56 overflow-hidden rounded-xl border border-slateGrey/15 bg-sand/95 py-1 shadow-lg backdrop-blur"
+          className="fixed z-50 w-56 overflow-hidden rounded-xl border border-slateGrey/15 bg-chalk/95 py-1 shadow-lg backdrop-blur"
           role="menu"
           aria-label="Slot actions"
           style={{
@@ -1060,7 +997,7 @@ export default function CalendarStep() {
                 className="-mx-1 max-h-[min(32rem,calc(100vh-10rem))] overflow-auto sm:-mx-0 sm:max-h-[min(40rem,calc(100vh-11rem))]"
               >
                 <div className="min-w-[34rem] sm:min-w-[42rem]">
-                  <div className="sticky top-0 z-30 flex border-b border-slateGrey/10 bg-sand/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-sand/90">
+                  <div className="sticky top-0 z-30 flex border-b border-slateGrey/10 bg-chalk/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-chalk/90">
                     <div className="min-w-[2.75rem] shrink-0 sm:min-w-12" aria-hidden />
                     <div className="grid min-w-0 flex-1 grid-cols-7">
                       {weekDays.map((d) => {
@@ -1103,7 +1040,7 @@ export default function CalendarStep() {
                   </div>
 
                   <div className="flex items-stretch">
-                    <div className="sticky left-0 z-20 flex shrink-0 flex-col bg-sand/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-sand/90">
+                    <div className="sticky left-0 z-20 flex shrink-0 flex-col bg-chalk/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-chalk/90">
                       {WEEK_HOUR_ROWS.map((h) => (
                         <div
                           key={h}
@@ -1261,7 +1198,7 @@ export default function CalendarStep() {
                   className="-mx-1 max-h-[min(32rem,calc(100vh-10rem))] overflow-auto sm:-mx-0 sm:max-h-[min(40rem,calc(100vh-11rem))]"
                 >
                   <div className="mx-auto min-w-[18rem] max-w-xl">
-                    <div className="sticky top-0 z-30 flex border-b border-slateGrey/10 bg-sand/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-sand/90">
+                    <div className="sticky top-0 z-30 flex border-b border-slateGrey/10 bg-chalk/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-chalk/90">
                       <button
                         type="button"
                         aria-label={`Return to weekly view (week ${isoWeekNumber(dayViewGrid.d)})`}
@@ -1307,7 +1244,7 @@ export default function CalendarStep() {
                     </div>
 
                     <div className="flex items-stretch">
-                      <div className="sticky left-0 z-20 flex shrink-0 flex-col bg-sand/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-sand/90">
+                      <div className="sticky left-0 z-20 flex shrink-0 flex-col bg-chalk/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-chalk/90">
                         {WEEK_HOUR_ROWS.map((h) => (
                           <div
                             key={h}
@@ -1456,112 +1393,18 @@ export default function CalendarStep() {
             )}
           </div>
 
-      {monthPickerOpen && (
-        <div
-          className="fixed inset-0 z-[35] flex items-end justify-center bg-slateGrey/30 p-4 sm:items-center sm:p-8"
-          role="presentation"
-          onMouseDown={() => setMonthPickerOpen(false)}
-        >
-          <div
-            className="flex max-h-[min(36rem,90vh)] w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-slateGrey/15 bg-sand/95 shadow-xl backdrop-blur"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="month-picker-title"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="grid shrink-0 grid-cols-3 items-center gap-1 border-b border-slateGrey/10 px-2 py-3 sm:px-3">
-              <div className="flex justify-start">
-                <button
-                  type="button"
-                  className={iconBtnBase}
-                  aria-label="Close"
-                  onClick={() => setMonthPickerOpen(false)}
-                >
-                  <IconClose className="h-5 w-5" />
-                </button>
-              </div>
-              <h2
-                id="month-picker-title"
-                className="min-w-0 truncate text-center font-body text-sm font-semibold text-slateGrey sm:text-base"
-              >
-                Select a Day
-              </h2>
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  className="font-body text-sm font-semibold text-slateGrey underline decoration-slateGrey/50 underline-offset-4 transition hover:decoration-slateGrey"
-                  onClick={pickTodayClosePicker}
-                >
-                  Today
-                </button>
-              </div>
-            </div>
-
-            <div className="grid shrink-0 grid-cols-7 border-b border-slateGrey/10 px-2 py-2 sm:px-3">
-              {pickerDowLabels.map((label, i) => (
-                <div
-                  key={`${label}-${i}`}
-                  className="text-center font-display text-[8px] font-normal uppercase tracking-[0.2em] text-slateGrey/45 sm:text-[9px]"
-                >
-                  {label}
-                </div>
-              ))}
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2 sm:px-4">
-              {pickerMonths.map((m) => {
-                const monthKey = `${m.getFullYear()}-${m.getMonth()}`;
-                const cells = buildPickerMonthCells(m);
-                const scrollHere = sameMonth(m, parseISODate(selectedDate));
-                return (
-                  <section
-                    key={monthKey}
-                    ref={scrollHere ? activePickerMonthRef : undefined}
-                    className="pb-8 last:pb-4"
-                    aria-label={isoMonthLabel(m)}
-                  >
-                    <h3 className="py-4 text-center font-body text-base font-semibold text-slateGrey sm:text-[17px]">
-                      {isoMonthLabel(m)}
-                    </h3>
-                    <div className="grid grid-cols-7 gap-y-2 sm:gap-y-3">
-                      {cells.map((dayNum, idx) => {
-                        if (dayNum == null) {
-                          return <div key={`${monthKey}-e-${idx}`} className="aspect-square min-h-[2.25rem]" />;
-                        }
-                        const cellDate = calendarDate(new Date(m.getFullYear(), m.getMonth(), dayNum));
-                        const k = isoDate(cellDate);
-                        const isSelected = k === selectedDate;
-                        const isTodayCell = sameDay(cellDate, new Date());
-                        return (
-                          <div key={`${monthKey}-${dayNum}`} className="flex aspect-square min-h-[2.25rem] items-start justify-center pt-0.5">
-                            <button
-                              type="button"
-                              onClick={() => pickCalendarDay(m, dayNum)}
-                              className="flex h-8 w-8 items-center justify-center rounded-full font-body text-[13px] font-normal tabular-nums text-slateGrey transition hover:bg-slateGrey/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slateGrey/25 sm:h-9 sm:w-9 sm:text-sm"
-                            >
-                              {isSelected ? (
-                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#7C1618] text-[13px] leading-none text-white sm:h-9 sm:w-9 sm:text-sm">
-                                  {dayNum}
-                                </span>
-                              ) : isTodayCell ? (
-                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#2b2b2b] text-[13px] leading-none text-white sm:h-9 sm:w-9 sm:text-sm">
-                                  {dayNum}
-                                </span>
-                              ) : (
-                                dayNum
-                              )}
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </section>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
+      <ScrollingMonthCalendarDialog
+        open={monthPickerOpen}
+        selectedDate={parseISODate(selectedDate)}
+        onClose={() => setMonthPickerOpen(false)}
+        onSelectDay={(d) => {
+          const cd = calendarDate(d);
+          setSelectedDate(isoDate(cd));
+          setMonthCursor(startOfMonth(cd));
+          setWeekCursor(cd);
+          setMonthPickerOpen(false);
+        }}
+      />
 
       {detailOpen && (
         <div
@@ -1570,7 +1413,7 @@ export default function CalendarStep() {
             if (e.target === e.currentTarget) setDetailOpen(false);
           }}
         >
-          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-slateGrey/15 bg-sand/95 shadow-pepla backdrop-blur">
+          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-slateGrey/15 bg-chalk/95 shadow-pepla backdrop-blur">
             <div className="flex items-start justify-between gap-4 border-b border-slateGrey/15 px-6 py-5">
               <div>
                 <div className="font-display tracking-pepla text-[11px] uppercase opacity-80">Selected day</div>
@@ -1621,7 +1464,7 @@ export default function CalendarStep() {
                         id="modal-dur"
                         value={durationMins}
                         onChange={(e) => setDurationMins(Number(e.target.value))}
-                        className="h-10 w-full rounded-xl border border-slateGrey/20 bg-sand/40 px-3 font-body text-[15px] outline-none focus:border-slateGrey/40"
+                        className="h-10 w-full rounded-xl border border-slateGrey/20 bg-slateGrey/5 px-3 font-body text-[15px] outline-none focus:border-slateGrey/40"
                       >
                         <option value={30}>30 min</option>
                         <option value={60}>60 min</option>

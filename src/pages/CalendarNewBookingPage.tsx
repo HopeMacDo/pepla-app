@@ -5,6 +5,14 @@ import type { Appointment } from "../lib/models";
 import { listAppointments, putAppointment } from "../lib/storage";
 import { CUSTOMERS_TABLE, toTrimmedString, type Customer } from "@/lib/customers";
 import { formatSupabaseError, supabase } from "@/lib/supabase";
+import {
+  businessHour12Options,
+  inferMeridiemFromBusinessHours,
+  parseHHMM,
+  timeHHMMRoundedNow,
+  toHHMM24,
+  type Meridiem
+} from "../lib/businessTime";
 
 function isoDate(d: Date) {
   const yyyy = d.getFullYear();
@@ -48,49 +56,6 @@ function displayCustomerName(c: Customer) {
 function safeCloseToCalendar(navigate: ReturnType<typeof useNavigate>) {
   if (window.history.length > 1) navigate(-1);
   else navigate("/calendar");
-}
-
-type Meridiem = "AM" | "PM";
-
-function timeHHMMRoundedNow(stepMins = 15) {
-  const now = new Date();
-  const mins = now.getHours() * 60 + now.getMinutes();
-  const rounded = Math.round(mins / stepMins) * stepMins;
-  const hh = Math.floor((rounded % (24 * 60)) / 60);
-  const mm = rounded % 60;
-  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-}
-
-function parseHHMM(value: string): { hh: number; mm: number } | null {
-  const m = value.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return null;
-  const hh = Number(m[1]);
-  const mm = Number(m[2]);
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
-  if (hh < 0 || hh > 23) return null;
-  if (mm < 0 || mm > 59) return null;
-  return { hh, mm };
-}
-
-function toHHMM24(hour12: number, minute: number, meridiem: Meridiem): string {
-  const h12 = Math.min(12, Math.max(1, Math.trunc(hour12)));
-  const mm = Math.min(59, Math.max(0, Math.trunc(minute)));
-  const base = h12 % 12; // 12 -> 0
-  const hh24 = meridiem === "PM" ? base + 12 : base;
-  return `${String(hh24).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-}
-
-function inferMeridiemFromBusinessHours(hour12: number): Meridiem | null {
-  // 8–11 -> AM, 12–7 -> PM
-  if (hour12 >= 8 && hour12 <= 11) return "AM";
-  if (hour12 === 12) return "PM";
-  if (hour12 >= 1 && hour12 <= 7) return "PM";
-  return null;
-}
-
-function businessHour12Options(): number[] {
-  // 8,9,10,11,12,1..7
-  return [8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7];
 }
 
 export default function CalendarNewBookingPage() {
@@ -334,7 +299,7 @@ export default function CalendarNewBookingPage() {
                   />
                   {customersError && <div className="mt-2 font-body text-sm text-deepRed">{customersError}</div>}
                   {customerMenuOpen && !customersLoading && !customersError && (
-                    <div className="absolute left-0 right-0 z-30 mt-2 overflow-hidden rounded-xl border border-slateGrey/15 bg-sand/95 shadow-lg backdrop-blur">
+                    <div className="absolute left-0 right-0 z-30 mt-2 overflow-hidden rounded-xl border border-slateGrey/15 bg-chalk/95 shadow-lg backdrop-blur">
                       {filteredCustomers.length === 0 ? (
                         <div className="px-4 py-3 font-body text-sm text-slateGrey/70">No matches</div>
                       ) : (
