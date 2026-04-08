@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import type { FormDetailOutletContext } from "./FormDetailPage";
 import {
@@ -891,8 +891,8 @@ function QuestionBlockEditor({
     colLabels[i] = v;
     onChange(block.id, { colLabels });
   };
-  const addRow = () => onChange(block.id, { rowLabels: [...block.rowLabels, `Row ${block.rowLabels.length + 1}`] });
-  const addCol = () => onChange(block.id, { colLabels: [...block.colLabels, `Column ${block.colLabels.length + 1}`] });
+  const addRow = () => onChange(block.id, { rowLabels: [...block.rowLabels, ""] });
+  const addCol = () => onChange(block.id, { colLabels: [...block.colLabels, ""] });
   const removeRow = (i: number) => {
     if (block.rowLabels.length <= 1) return;
     onChange(block.id, { rowLabels: block.rowLabels.filter((_, j) => j !== i) });
@@ -901,6 +901,21 @@ function QuestionBlockEditor({
     if (block.colLabels.length <= 1) return;
     onChange(block.id, { colLabels: block.colLabels.filter((_, j) => j !== i) });
   };
+
+  const focusNewGridRowRef = useRef(false);
+  const focusNewGridColRef = useRef(false);
+  useLayoutEffect(() => {
+    if (focusNewGridRowRef.current) {
+      focusNewGridRowRef.current = false;
+      const idx = block.rowLabels.length - 1;
+      document.getElementById(`grid-row-${block.id}-${idx}`)?.focus();
+    }
+    if (focusNewGridColRef.current) {
+      focusNewGridColRef.current = false;
+      const idx = block.colLabels.length - 1;
+      document.getElementById(`grid-col-${block.id}-${idx}`)?.focus();
+    }
+  }, [block.id, block.rowLabels.length, block.colLabels.length]);
 
   return (
     <Card className="min-w-0 border-l-[3px] border-l-slateGrey/25">
@@ -1010,9 +1025,16 @@ function QuestionBlockEditor({
                   {block.rowLabels.map((row, i) => (
                     <li key={i} className="flex items-center gap-2">
                       <input
+                        id={`grid-row-${block.id}-${i}`}
                         type="text"
                         value={row}
                         onChange={(e) => setRow(i, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                          e.preventDefault();
+                          focusNewGridRowRef.current = true;
+                          addRow();
+                        }}
                         placeholder={`Row ${i + 1}`}
                         className={cx(
                           "min-w-0 flex-1 border-0 border-b border-slateGrey/20 bg-transparent py-1.5 font-body text-sm text-slateGrey outline-none transition-colors",
@@ -1047,9 +1069,16 @@ function QuestionBlockEditor({
                   {block.colLabels.map((col, i) => (
                     <li key={i} className="flex items-center gap-2">
                       <input
+                        id={`grid-col-${block.id}-${i}`}
                         type="text"
                         value={col}
                         onChange={(e) => setCol(i, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                          e.preventDefault();
+                          focusNewGridColRef.current = true;
+                          addCol();
+                        }}
                         placeholder={`Column ${i + 1}`}
                         className={cx(
                           "min-w-0 flex-1 border-0 border-b border-slateGrey/20 bg-transparent py-1.5 font-body text-sm text-slateGrey outline-none transition-colors",

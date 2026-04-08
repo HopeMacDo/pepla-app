@@ -42,8 +42,8 @@ function formatAnswerValue(block: QuestionBlock, v: unknown): string {
       const g = v as Record<string, number>;
       return Object.entries(g)
         .map(([ri, ci]) => {
-          const r = block.rowLabels[Number(ri)] ?? `Row ${Number(ri) + 1}`;
-          const c = block.colLabels[ci] ?? `Col ${ci + 1}`;
+          const r = (block.rowLabels[Number(ri)] ?? "").trim() || `Row ${Number(ri) + 1}`;
+          const c = (block.colLabels[ci] ?? "").trim() || `Column ${ci + 1}`;
           return `${r}: ${c}`;
         })
         .join("; ") || "—";
@@ -54,8 +54,8 @@ function formatAnswerValue(block: QuestionBlock, v: unknown): string {
       return Object.entries(g)
         .flatMap(([ri, cols]) =>
           (cols ?? []).map((ci) => {
-            const r = block.rowLabels[Number(ri)] ?? `Row ${Number(ri) + 1}`;
-            const c = block.colLabels[ci] ?? `Col ${ci + 1}`;
+            const r = (block.rowLabels[Number(ri)] ?? "").trim() || `Row ${Number(ri) + 1}`;
+            const c = (block.colLabels[ci] ?? "").trim() || `Column ${ci + 1}`;
             return `${r} × ${c}`;
           })
         )

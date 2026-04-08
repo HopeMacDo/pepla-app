@@ -1,7 +1,50 @@
 import { z } from "zod";
 
-export const IntakeStatusSchema = z.enum(["requests", "accepted", "upcoming"]);
+export const IntakeStatusSchema = z.enum(["requests", "accepted", "upcoming", "completed", "denied"]);
 export type IntakeStatus = z.infer<typeof IntakeStatusSchema>;
+
+/** Message in an inbox thread timeline. */
+export const InboxMessageSenderSchema = z.enum(["provider", "client"]);
+export type InboxMessageSender = z.infer<typeof InboxMessageSenderSchema>;
+
+export const InboxMessageContentTypeSchema = z.enum([
+  "text",
+  "slot_offer",
+  "booking_confirmation",
+  "payment_status"
+]);
+export type InboxMessageContentType = z.infer<typeof InboxMessageContentTypeSchema>;
+
+export const InboxMessageSchema = z.object({
+  id: z.string(),
+  sender: InboxMessageSenderSchema,
+  at: z.string(),
+  contentType: InboxMessageContentTypeSchema,
+  body: z.string().default("")
+});
+export type InboxMessage = z.infer<typeof InboxMessageSchema>;
+
+export const InboxSlotStatusSchema = z.enum(["pending", "selected", "expired"]);
+export type InboxSlotStatus = z.infer<typeof InboxSlotStatusSchema>;
+
+export const InboxSlotSchema = z.object({
+  id: z.string(),
+  startISO: z.string(),
+  durationMins: z.number().int().positive(),
+  status: InboxSlotStatusSchema
+});
+export type InboxSlot = z.infer<typeof InboxSlotSchema>;
+
+export const InboxPaymentStatusSchema = z.enum(["unpaid", "paid", "waived"]);
+export type InboxPaymentStatus = z.infer<typeof InboxPaymentStatusSchema>;
+
+export const InboxBookingDetailsSchema = z.object({
+  selectedSlotId: z.string().optional(),
+  serviceLabel: z.string(),
+  depositAmount: z.number().nonnegative(),
+  paymentStatus: InboxPaymentStatusSchema
+});
+export type InboxBookingDetails = z.infer<typeof InboxBookingDetailsSchema>;
 
 export const IntakeAvailabilitySchema = z.object({
   mornings: z.object({
@@ -40,6 +83,10 @@ export type BookingProposal = z.infer<typeof BookingProposalSchema>;
 export const IntakeRequestSchema = z.object({
   id: z.string(),
   createdAt: z.string(),
+  /** Last activity on the thread (messages, status changes, etc.). */
+  updatedAt: z.string().optional(),
+  /** Optional `Customer.id` from `lib/customers.ts` (Supabase CRM). */
+  customerId: z.string().optional(),
   customerName: z.string().min(1),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
@@ -49,9 +96,16 @@ export const IntakeRequestSchema = z.object({
   availabilitySelections: IntakeAvailabilitySchema.optional(),
   photoDataUrls: z.array(z.string()).default([]),
   status: IntakeStatusSchema.default("requests"),
-  proposal: BookingProposalSchema.optional()
+  proposal: BookingProposalSchema.optional(),
+  messages: z.array(InboxMessageSchema).default([]),
+  slots: z.array(InboxSlotSchema).default([]),
+  bookingDetails: InboxBookingDetailsSchema.optional()
 });
 export type IntakeRequest = z.infer<typeof IntakeRequestSchema>;
+
+/** Inbox thread aggregate — persisted as an intake row in IndexedDB. */
+export const InboxThreadSchema = IntakeRequestSchema;
+export type InboxThread = IntakeRequest;
 
 export const AppointmentSchema = z.object({
   id: z.string(),

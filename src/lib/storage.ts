@@ -1,5 +1,14 @@
 import { createStore, del, get, getMany, keys, set } from "idb-keyval";
-import type { Appointment, BookingProposal, IntakeAvailability, IntakeRequest, IntakeStatus } from "./models";
+import type {
+  Appointment,
+  BookingProposal,
+  InboxBookingDetails,
+  InboxMessage,
+  InboxSlot,
+  IntakeAvailability,
+  IntakeRequest,
+  IntakeStatus
+} from "./models";
 
 const appStore = createStore("pepla-booking", "app");
 
@@ -27,17 +36,48 @@ function normalizeProposal(p: IntakeRequest["proposal"]): IntakeRequest["proposa
   };
 }
 
+function slotsFromProposal(row: IntakeRequest): InboxSlot[] {
+  const p = row.proposal;
+  if (!p) return [];
+  return p.slotStartISOs.map((startISO) => ({
+    id: `offer:${startISO}`,
+    startISO,
+    durationMins: p.durationMins,
+    status:
+      p.selectedSlotISO === startISO || p.pendingSlotISO === startISO ? ("selected" as const) : ("pending" as const)
+  }));
+}
+
+function derivedBookingDetails(row: IntakeRequest): InboxBookingDetails | undefined {
+  const p = row.proposal;
+  if (!p) return undefined;
+  return {
+    serviceLabel: p.serviceName,
+    depositAmount: p.deposit,
+    paymentStatus: p.depositPaid ? "paid" : "unpaid",
+    selectedSlotId: p.pendingSlotISO ? `offer:${p.pendingSlotISO}` : p.selectedSlotISO ? `offer:${p.selectedSlotISO}` : undefined
+  };
+}
+
 function normalizeIntake(req: IntakeRequest): IntakeRequest {
   const parsed = parseName(req.customerName);
-  return {
+  const proposal = normalizeProposal(req.proposal);
+  const withCore: IntakeRequest = {
     ...req,
     firstName: req.firstName ?? parsed.firstName,
     lastName: req.lastName ?? parsed.lastName,
     vision: req.vision ?? "",
     availabilitySelections: req.availabilitySelections ?? emptyAvailability(),
     status: req.status ?? "requests",
-    proposal: normalizeProposal(req.proposal)
+    proposal,
+    messages: req.messages ?? [],
+    updatedAt: req.updatedAt ?? req.createdAt,
+    customerId: req.customerId,
+    slots: req.slots ?? [],
+    bookingDetails: req.bookingDetails ?? (proposal ? derivedBookingDetails({ ...req, proposal }) : undefined)
   };
+  const slots = proposal ? slotsFromProposal(withCore) : withCore.slots.length ? withCore.slots : [];
+  return { ...withCore, slots };
 }
 
 function seedIntake(now = new Date()): IntakeRequest[] {
@@ -46,6 +86,7 @@ function seedIntake(now = new Date()): IntakeRequest[] {
     {
       id: crypto.randomUUID(),
       createdAt: mkDate(0),
+      updatedAt: mkDate(0),
       firstName: "Jane",
       lastName: "Smith",
       customerName: "Jane Smith",
@@ -57,11 +98,14 @@ function seedIntake(now = new Date()): IntakeRequest[] {
         afternoons: { tue: false, wed: false, thu: false, fri: false, sat: true }
       },
       photoDataUrls: [],
-      status: "requests"
+      status: "requests",
+      messages: [],
+      slots: []
     },
     {
       id: crypto.randomUUID(),
       createdAt: mkDate(1),
+      updatedAt: mkDate(1),
       firstName: "Maya",
       lastName: "Johnson",
       customerName: "Maya Johnson",
@@ -73,11 +117,14 @@ function seedIntake(now = new Date()): IntakeRequest[] {
         afternoons: { tue: false, wed: false, thu: true, fri: true, sat: false }
       },
       photoDataUrls: [],
-      status: "requests"
+      status: "requests",
+      messages: [],
+      slots: []
     },
     {
       id: crypto.randomUUID(),
       createdAt: mkDate(4),
+      updatedAt: mkDate(4),
       firstName: "Amber",
       lastName: "Adams",
       customerName: "Amber Adams",
@@ -89,11 +136,14 @@ function seedIntake(now = new Date()): IntakeRequest[] {
         afternoons: { tue: false, wed: true, thu: false, fri: false, sat: true }
       },
       photoDataUrls: [],
-      status: "accepted"
+      status: "accepted",
+      messages: [],
+      slots: []
     },
     {
       id: crypto.randomUUID(),
       createdAt: mkDate(7),
+      updatedAt: mkDate(7),
       firstName: "Rylie",
       lastName: "Holt",
       customerName: "Rylie Holt",
@@ -105,7 +155,47 @@ function seedIntake(now = new Date()): IntakeRequest[] {
         afternoons: { tue: false, wed: false, thu: false, fri: false, sat: false }
       },
       photoDataUrls: [],
-      status: "upcoming"
+      status: "upcoming",
+      messages: [],
+      slots: []
+    },
+    {
+      id: crypto.randomUUID(),
+      createdAt: mkDate(10),
+      updatedAt: mkDate(2),
+      firstName: "Noah",
+      lastName: "Park",
+      customerName: "Noah Park",
+      phoneNumber: "(555) 441-2290",
+      vision: "Editorial shoot — bold liner and dewy skin.",
+      availability: "Mornings: FRI | Afternoons: SAT",
+      availabilitySelections: {
+        mornings: { tue: false, wed: false, thu: false, fri: true, sat: false },
+        afternoons: { tue: false, wed: false, thu: false, fri: false, sat: true }
+      },
+      photoDataUrls: [],
+      status: "denied",
+      messages: [],
+      slots: []
+    },
+    {
+      id: crypto.randomUUID(),
+      createdAt: mkDate(14),
+      updatedAt: mkDate(1),
+      firstName: "Elise",
+      lastName: "Chen",
+      customerName: "Elise Chen",
+      phoneNumber: "(555) 112-8834",
+      vision: "Corporate headshots — minimal, mattified, camera-ready.",
+      availability: "Mornings: THU | Afternoons: none",
+      availabilitySelections: {
+        mornings: { tue: false, wed: false, thu: true, fri: false, sat: false },
+        afternoons: { tue: false, wed: false, thu: false, fri: false, sat: false }
+      },
+      photoDataUrls: [],
+      status: "completed",
+      messages: [],
+      slots: []
     }
   ];
 }
@@ -117,13 +207,14 @@ export async function listIntake(): Promise<IntakeRequest[]> {
   const allKeys = (await keys(appStore)).filter((k) => typeof k === "string" && k.startsWith("intake:")) as string[];
   if (allKeys.length === 0) {
     const seeds = seedIntake();
-    await Promise.all(seeds.map((req) => putIntake(req)));
-    return seeds;
+    const normalized = seeds.map((req) => normalizeIntake(req));
+    await Promise.all(normalized.map((req) => putIntake(req)));
+    return normalized.sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt));
   }
   const items = (await getMany(allKeys, appStore)) as Array<IntakeRequest | undefined>;
   const normalized = (items.filter(Boolean) as IntakeRequest[]).map(normalizeIntake);
   await Promise.all(normalized.map((req) => putIntake(req)));
-  return normalized.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return normalized.sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt));
 }
 
 export async function getIntakeById(id: string): Promise<IntakeRequest | null> {
@@ -137,7 +228,27 @@ export async function getIntakeById(id: string): Promise<IntakeRequest | null> {
 export async function updateIntakeStatus(id: string, status: IntakeStatus): Promise<IntakeRequest | null> {
   const row = await getIntakeById(id);
   if (!row) return null;
-  const next = { ...row, status };
+  const now = new Date().toISOString();
+  const next = { ...row, status, updatedAt: now };
+  await putIntake(next);
+  return next;
+}
+
+export async function appendInboxMessage(
+  id: string,
+  partial: Omit<InboxMessage, "id" | "at"> & { id?: string; at?: string }
+): Promise<IntakeRequest | null> {
+  const row = await getIntakeById(id);
+  if (!row) return null;
+  const at = partial.at ?? new Date().toISOString();
+  const message: InboxMessage = {
+    id: partial.id ?? crypto.randomUUID(),
+    at,
+    sender: partial.sender,
+    contentType: partial.contentType,
+    body: partial.body ?? ""
+  };
+  const next = { ...row, messages: [...(row.messages ?? []), message], updatedAt: at };
   await putIntake(next);
   return next;
 }
@@ -157,20 +268,39 @@ export async function sendBookingProposal(id: string, payload: BookingProposalIn
   if (!row || row.status !== "accepted") return null;
   const uniq = Array.from(new Set(payload.slotStartISOs)).sort((a, b) => a.localeCompare(b));
   if (uniq.length === 0) return null;
+  const sentAt = new Date().toISOString();
   const proposal: BookingProposal = {
     serviceName: payload.serviceName.trim(),
     durationMins: payload.durationMins,
     price: payload.price,
     deposit: payload.deposit,
     slotStartISOs: uniq,
-    sentAt: new Date().toISOString(),
+    sentAt,
     depositPaid: false,
     pendingSlotISO: undefined,
     selectedSlotISO: undefined
   };
-  const next = { ...row, proposal };
+  const offerMessage: InboxMessage = {
+    id: crypto.randomUUID(),
+    sender: "provider",
+    at: sentAt,
+    contentType: "slot_offer",
+    body: `Offered ${uniq.length} time option(s).`
+  };
+  const bookingDetails: InboxBookingDetails = {
+    serviceLabel: payload.serviceName.trim(),
+    depositAmount: payload.deposit,
+    paymentStatus: "unpaid"
+  };
+  const next = {
+    ...row,
+    proposal,
+    bookingDetails,
+    messages: [...(row.messages ?? []), offerMessage],
+    updatedAt: sentAt
+  };
   await putIntake(next);
-  return next;
+  return normalizeIntake(next);
 }
 
 type FinalizeProposalResult =
@@ -209,7 +339,8 @@ async function finalizeProposalBookingFromRow(row: IntakeRequest): Promise<Final
   const next: IntakeRequest = {
     ...row,
     status: "upcoming",
-    proposal: { ...row.proposal, selectedSlotISO: slotStartISO, pendingSlotISO: undefined }
+    proposal: { ...row.proposal, selectedSlotISO: slotStartISO, pendingSlotISO: undefined },
+    updatedAt: new Date().toISOString()
   };
   await putIntake(next);
   return { ok: true, intake: next };
@@ -234,7 +365,7 @@ export async function setProposalPendingSlot(intakeId: string, slotStartISO: str
   if (Number.isNaN(start.getTime())) return { ok: false, error: "invalid_slot" };
 
   const proposalAfterPick = { ...row.proposal, pendingSlotISO: slotStartISO };
-  const merged: IntakeRequest = { ...row, proposal: proposalAfterPick };
+  const merged: IntakeRequest = { ...row, proposal: proposalAfterPick, updatedAt: new Date().toISOString() };
   await putIntake(merged);
 
   if (!proposalAfterPick.depositPaid) {
@@ -260,7 +391,7 @@ export async function setProposalDepositPaid(intakeId: string, paid: boolean): P
   if (!row.proposal) return { ok: false, error: "no_proposal" };
 
   const proposalAfterDeposit = { ...row.proposal, depositPaid: paid };
-  const merged: IntakeRequest = { ...row, proposal: proposalAfterDeposit };
+  const merged: IntakeRequest = { ...row, proposal: proposalAfterDeposit, updatedAt: new Date().toISOString() };
   await putIntake(merged);
 
   if (!paid || !proposalAfterDeposit.pendingSlotISO) {

@@ -4,12 +4,16 @@ import { Card, CardBody, CardHeader, Input, Label } from "../ui/primitives";
 import type { IntakeRequest, IntakeStatus } from "../lib/models";
 import { listIntake } from "../lib/storage";
 
-const tabOrder: IntakeStatus[] = ["requests", "accepted", "upcoming"];
+const tabOrderPrimary: IntakeStatus[] = ["requests", "accepted", "upcoming"];
+const tabOrderArchive: IntakeStatus[] = ["completed", "denied"];
 const tabLabel: Record<IntakeStatus, string> = {
   requests: "Requests",
   accepted: "Accepted",
-  upcoming: "Upcoming"
+  upcoming: "Upcoming",
+  completed: "Completed",
+  denied: "Denied"
 };
+const allStatuses: IntakeStatus[] = [...tabOrderPrimary, ...tabOrderArchive];
 
 function shortVision(text: string | undefined) {
   const value = (text ?? "").trim();
@@ -48,14 +52,17 @@ function rowInitials(row: IntakeRequest) {
   return name.slice(0, 2).toUpperCase();
 }
 
-function formatShortDate(iso: string) {
-  const d = new Date(iso);
+function formatLastUpdated(iso: string | undefined, fallback: string) {
+  const raw = iso ?? fallback;
+  const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-/** Display-only: NEW = needs studio action; PENDING = waiting on client. Upcoming rows have no badge. */
-function rowStatusBadge(row: IntakeRequest): "NEW" | "PENDING" | null {
+/** Display-only: NEW = needs studio action; PENDING = waiting on client. */
+function rowStatusBadge(row: IntakeRequest): "NEW" | "PENDING" | "DONE" | "DENIED" | null {
+  if (row.status === "completed") return "DONE";
+  if (row.status === "denied") return "DENIED";
   if (row.status === "upcoming") return null;
   if (row.status === "requests") return "NEW";
   if (row.status === "accepted") {
@@ -77,7 +84,13 @@ function listSummaryLine(tab: IntakeStatus, totalInTab: number, matchCount: numb
   if (tab === "accepted") {
     return `${totalInTab} ${totalInTab === 1 ? "client" : "clients"} in accepted booking.`;
   }
-  return `${totalInTab} scheduled on the calendar.`;
+  if (tab === "upcoming") {
+    return `${totalInTab} scheduled on the calendar.`;
+  }
+  if (tab === "completed") {
+    return `${totalInTab} completed ${totalInTab === 1 ? "thread" : "threads"}.`;
+  }
+  return `${totalInTab} denied ${totalInTab === 1 ? "request" : "requests"}.`;
 }
 
 export default function AdminDashboardStep() {
@@ -88,7 +101,7 @@ export default function AdminDashboardStep() {
 
   const currentTab = useMemo<IntakeStatus>(() => {
     const raw = (sp.get("tab") ?? "requests").toLowerCase();
-    return tabOrder.includes(raw as IntakeStatus) ? (raw as IntakeStatus) : "requests";
+    return allStatuses.includes(raw as IntakeStatus) ? (raw as IntakeStatus) : "requests";
   }, [sp]);
 
   useEffect(() => {
@@ -98,12 +111,12 @@ export default function AdminDashboardStep() {
   }, [location.key]);
 
   const countsByTab = useMemo(() => {
-    return tabOrder.reduce(
+    return allStatuses.reduce(
       (acc, tab) => {
         acc[tab] = rows.filter((row) => row.status === tab).length;
         return acc;
       },
-      { requests: 0, accepted: 0, upcoming: 0 } as Record<IntakeStatus, number>
+      { requests: 0, accepted: 0, upcoming: 0, completed: 0, denied: 0 } as Record<IntakeStatus, number>
     );
   }, [rows]);
 
@@ -139,33 +152,63 @@ export default function AdminDashboardStep() {
             className="relative border-b-[0.5px] pb-0"
             style={{ borderColor: "var(--color-border-tertiary)" }}
           >
-            <div className="relative flex flex-wrap gap-x-8 gap-y-2">
-              {tabOrder.map((tab) => {
-                const active = tab === currentTab;
-                return (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setSp({ tab })}
-                    className={[
-                      "flex items-center gap-2 pb-3 pt-1 font-display text-xs uppercase tracking-pepla transition",
-                      "border-b-[1.5px] -mb-[0.5px]",
-                      active ? "border-[#0E0E0E] text-[#0E0E0E]" : "border-transparent text-slateGrey/50 hover:text-slateGrey/75"
-                    ].join(" ")}
-                  >
-                    <span>{tabLabel[tab]}</span>
-                    <span
+            <div className="relative flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+              <div className="flex flex-wrap gap-x-8 gap-y-2">
+                {tabOrderPrimary.map((tab) => {
+                  const active = tab === currentTab;
+                  return (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setSp({ tab })}
                       className={[
-                        "inline-grid min-w-[1.25rem] place-items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none",
-                        active ? "bg-[#0E0E0E] text-[#F2EFE9]" : "text-slateGrey/70"
+                        "flex items-center gap-2 pb-3 pt-1 font-display text-xs uppercase tracking-pepla transition",
+                        "border-b-[1.5px] -mb-[0.5px]",
+                        active ? "border-[#0E0E0E] text-[#0E0E0E]" : "border-transparent text-slateGrey/50 hover:text-slateGrey/75"
                       ].join(" ")}
-                      style={active ? undefined : { backgroundColor: "var(--color-background-secondary)" }}
                     >
-                      {countsByTab[tab]}
-                    </span>
-                  </button>
-                );
-              })}
+                      <span>{tabLabel[tab]}</span>
+                      <span
+                        className={[
+                          "inline-grid min-w-[1.25rem] place-items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none",
+                          active ? "bg-[#0E0E0E] text-[#F2EFE9]" : "text-slateGrey/70"
+                        ].join(" ")}
+                        style={active ? undefined : { backgroundColor: "var(--color-background-secondary)" }}
+                      >
+                        {countsByTab[tab]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap gap-x-8 gap-y-2 sm:ml-4">
+                {tabOrderArchive.map((tab) => {
+                  const active = tab === currentTab;
+                  return (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setSp({ tab })}
+                      className={[
+                        "flex items-center gap-2 pb-3 pt-1 font-display text-xs uppercase tracking-pepla transition",
+                        "border-b-[1.5px] -mb-[0.5px]",
+                        active ? "border-[#0E0E0E] text-[#0E0E0E]" : "border-transparent text-slateGrey/50 hover:text-slateGrey/75"
+                      ].join(" ")}
+                    >
+                      <span>{tabLabel[tab]}</span>
+                      <span
+                        className={[
+                          "inline-grid min-w-[1.25rem] place-items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none",
+                          active ? "bg-[#0E0E0E] text-[#F2EFE9]" : "text-slateGrey/70"
+                        ].join(" ")}
+                        style={active ? undefined : { backgroundColor: "var(--color-background-secondary)" }}
+                      >
+                        {countsByTab[tab]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -228,6 +271,9 @@ export default function AdminDashboardStep() {
                           <div className="font-body text-lg text-slateGrey">
                             {[row.firstName, row.lastName].filter(Boolean).join(" ") || row.customerName}
                           </div>
+                          {row.customerId && (
+                            <span className="font-display text-[10px] uppercase tracking-pepla text-slateGrey/45">CRM</span>
+                          )}
                           {currentTab === "accepted" && row.proposal && (
                             <span className="font-display text-[10px] uppercase tracking-pepla text-[#8a6b47]">
                               Proposal sent
@@ -238,7 +284,10 @@ export default function AdminDashboardStep() {
                         <div className="mt-2 font-body text-xs uppercase tracking-[0.08em] text-slateGrey/55">{formatAvailability(row)}</div>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1.5 text-right">
-                        <div className="font-body text-xs text-slateGrey/65">{formatShortDate(row.createdAt)}</div>
+                        <div className="font-body text-xs text-slateGrey/65">
+                          <span className="block text-[10px] uppercase tracking-pepla text-slateGrey/45">Updated</span>
+                          {formatLastUpdated(row.updatedAt, row.createdAt)}
+                        </div>
                         {badge === "NEW" && (
                           <span className="rounded px-2 py-0.5 font-display text-[10px] font-medium tracking-pepla text-[#F2EFE9]" style={{ backgroundColor: "#7C1618" }}>
                             NEW
@@ -250,6 +299,19 @@ export default function AdminDashboardStep() {
                             style={{ backgroundColor: "var(--color-background-secondary)" }}
                           >
                             PENDING
+                          </span>
+                        )}
+                        {badge === "DONE" && (
+                          <span
+                            className="rounded px-2 py-0.5 font-display text-[10px] font-medium tracking-pepla text-slateGrey/70"
+                            style={{ backgroundColor: "var(--color-background-secondary)" }}
+                          >
+                            DONE
+                          </span>
+                        )}
+                        {badge === "DENIED" && (
+                          <span className="rounded px-2 py-0.5 font-display text-[10px] font-medium tracking-pepla text-slateGrey/80">
+                            DENIED
                           </span>
                         )}
                       </div>

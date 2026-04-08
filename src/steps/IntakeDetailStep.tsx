@@ -1,33 +1,16 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Button, Card, CardBody, CardHeader, Input, Label } from "../ui/primitives";
+import { Button, Card, CardBody, CardHeader, Label, Textarea } from "../ui/primitives";
 import type { IntakeRequest, IntakeStatus } from "../lib/models";
-import { getIntakeById, sendBookingProposal, setProposalDepositPaid, updateIntakeStatus } from "../lib/storage";
+import { appendInboxMessage, getIntakeById, updateIntakeStatus } from "../lib/storage";
 
 const tabLabel: Record<IntakeStatus, string> = {
   requests: "Requests",
   accepted: "Accepted",
-  upcoming: "Upcoming"
+  upcoming: "Upcoming",
+  completed: "Completed",
+  denied: "Denied"
 };
-
-function isoDateLocal(d: Date) {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function toSlotISO(dateStr: string, timeStr: string): string {
-  const [y, m, d] = dateStr.split("-").map((x) => Number(x));
-  const [hh, mm] = timeStr.split(":").map((x) => Number(x));
-  return new Date(y, (m ?? 1) - 1, d ?? 1, hh ?? 0, mm ?? 0, 0, 0).toISOString();
-}
-
-function formatProposalSlot(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-}
 
 function formatAvailability(req: IntakeRequest) {
   const fromSelections = req.availabilitySelections;
@@ -48,24 +31,42 @@ function formatAvailability(req: IntakeRequest) {
   return req.availability;
 }
 
+function formatThreadTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function formatSlotLine(iso: string, durationMins: number) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return `${iso} · ${durationMins} min`;
+  const when = d.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return `${when} · ${durationMins} min`;
+}
+
+function contentTypeLabel(t: string) {
+  switch (t) {
+    case "slot_offer":
+      return "Slot offer";
+    case "booking_confirmation":
+      return "Booking";
+    case "payment_status":
+      return "Payment";
+    default:
+      return "Message";
+  }
+}
+
+const VALID_BACK_TABS: IntakeStatus[] = ["requests", "accepted", "upcoming", "completed", "denied"];
+
 export default function IntakeDetailStep() {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const { id } = useParams();
   const [row, setRow] = useState<IntakeRequest | null>(null);
   const [busy, setBusy] = useState(false);
-  const [proposalBusy, setProposalBusy] = useState(false);
-  const [proposalError, setProposalError] = useState<string | null>(null);
-  const [depositBusy, setDepositBusy] = useState(false);
-  const [depositError, setDepositError] = useState<string | null>(null);
-  const [copyDone, setCopyDone] = useState(false);
-  const [serviceName, setServiceName] = useState("");
-  const [durationMins, setDurationMins] = useState(45);
-  const [price, setPrice] = useState(120);
-  const [deposit, setDeposit] = useState(50);
-  const [slotRows, setSlotRows] = useState(() => [
-    { key: crypto.randomUUID(), date: isoDateLocal(new Date()), time: "10:00" }
-  ]);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [slotOfferOpen, setSlotOfferOpen] = useState(false);
 
   const clientProposalUrl = useMemo(() => {
     if (!id || typeof window === "undefined") return "";
@@ -73,135 +74,85 @@ export default function IntakeDetailStep() {
   }, [id]);
 
   const backTab = useMemo<IntakeStatus>(() => {
-    const raw = (sp.get("tab") ?? "requests").toLowerCase();
-    return raw === "accepted" || raw === "upcoming" ? raw : "requests";
+    const raw = (sp.get("tab") ?? "requests").toLowerCase() as IntakeStatus;
+    return VALID_BACK_TABS.includes(raw) ? raw : "requests";
   }, [sp]);
 
   useEffect(() => {
     if (!id) return;
+    let cancelled = false;
     (async () => {
-      setRow(await getIntakeById(id));
+      const r = await getIntakeById(id);
+      if (!cancelled) setRow(r);
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
-  useEffect(() => {
-    if (!row || row.status !== "accepted") return;
-    if (row.proposal) {
-      const p = row.proposal;
-      setServiceName(p.serviceName);
-      setDurationMins(p.durationMins);
-      setPrice(p.price);
-      setDeposit(p.deposit);
-      setSlotRows(
-        p.slotStartISOs.map((iso) => {
-          const d = new Date(iso);
-          const hh = String(d.getHours()).padStart(2, "0");
-          const mm = String(d.getMinutes()).padStart(2, "0");
-          return { key: crypto.randomUUID(), date: isoDateLocal(d), time: `${hh}:${mm}` };
-        })
-      );
-    } else {
-      setServiceName("");
-      setDurationMins(45);
-      setPrice(120);
-      setDeposit(50);
-      setSlotRows([{ key: crypto.randomUUID(), date: isoDateLocal(new Date()), time: "10:00" }]);
-    }
-  }, [row?.id, row?.status, row?.proposal?.sentAt]);
+  async function refresh() {
+    if (!id) return;
+    setRow(await getIntakeById(id));
+  }
 
-  async function moveTo(status: IntakeStatus) {
+  async function onDeny() {
     if (!id) return;
     setBusy(true);
     try {
-      const next = await updateIntakeStatus(id, status);
+      const next = await updateIntakeStatus(id, "denied");
       if (next) {
         setRow(next);
-        navigate(`/inbox?tab=${status}`);
+        navigate(`/inbox?tab=denied`);
       }
     } finally {
       setBusy(false);
     }
   }
 
-  async function submitProposal(e: FormEvent) {
+  async function confirmAcceptAfterPlaceholder() {
+    if (!id) return;
+    setBusy(true);
+    try {
+      const next = await updateIntakeStatus(id, "accepted");
+      if (next) {
+        setRow(next);
+        setSlotOfferOpen(false);
+        navigate(`/inbox?tab=accepted`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendReply(e: FormEvent) {
     e.preventDefault();
-    if (!id) return;
-    setProposalError(null);
-    const slots = slotRows.map((r) => toSlotISO(r.date, r.time));
-    if (slots.some((s) => Number.isNaN(new Date(s).getTime()))) {
-      setProposalError("Check each date and time.");
-      return;
-    }
-    if (!serviceName.trim()) {
-      setProposalError("Add a service name.");
-      return;
-    }
-    setProposalBusy(true);
+    if (!id || !replyDraft.trim()) return;
+    setBusy(true);
     try {
-      const next = await sendBookingProposal(id, {
-        serviceName: serviceName.trim(),
-        durationMins,
-        price,
-        deposit,
-        slotStartISOs: slots
+      const next = await appendInboxMessage(id, {
+        sender: "provider",
+        contentType: "text",
+        body: replyDraft.trim()
       });
-      if (next) setRow(next);
-      else setProposalError("Could not save proposal (intake must be Accepted).");
-    } finally {
-      setProposalBusy(false);
-    }
-  }
-
-  function addSlotRow() {
-    setSlotRows((rows) => [...rows, { key: crypto.randomUUID(), date: isoDateLocal(new Date()), time: "11:00" }]);
-  }
-
-  function removeSlotRow(key: string) {
-    setSlotRows((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.key !== key)));
-  }
-
-  async function copyClientLink() {
-    if (!clientProposalUrl) return;
-    try {
-      await navigator.clipboard.writeText(clientProposalUrl);
-      setCopyDone(true);
-      window.setTimeout(() => setCopyDone(false), 2000);
-    } catch {
-      setProposalError("Could not copy link.");
-    }
-  }
-
-  async function markDepositPaid(paid: boolean) {
-    if (!id) return;
-    setDepositError(null);
-    setDepositBusy(true);
-    try {
-      const result = await setProposalDepositPaid(id, paid);
-      if (!result.ok) {
-        if (result.error === "conflict") {
-          setDepositError(
-            "The client’s chosen time overlaps another booking. Ask them to pick a different slot or clear the calendar conflict."
-          );
-          setRow(await getIntakeById(id));
-        }
-        return;
-      }
-      setRow(result.intake);
-      if (result.finalized) {
-        navigate(`/inbox?tab=upcoming`);
+      if (next) {
+        setRow(next);
+        setReplyDraft("");
       }
     } finally {
-      setDepositBusy(false);
+      setBusy(false);
     }
   }
 
   if (!row) {
     return (
       <div className="mx-auto max-w-4xl">
-        <div className="font-body text-sm opacity-75">Loading intake request...</div>
+        <div className="font-body text-sm opacity-75">Loading thread…</div>
       </div>
     );
   }
+
+  const displayName = [row.firstName, row.lastName].filter(Boolean).join(" ") || row.customerName;
+  const sortedMessages = [...(row.messages ?? [])].sort((a, b) => a.at.localeCompare(b.at));
 
   return (
     <div className="grid gap-6">
@@ -216,217 +167,249 @@ export default function IntakeDetailStep() {
 
       <Card>
         <CardHeader>
-          <div className="font-display tracking-pepla text-xs uppercase opacity-80">Intake detail</div>
-          <div className="font-body mt-2 text-2xl">{[row.firstName, row.lastName].filter(Boolean).join(" ") || row.customerName}</div>
-        </CardHeader>
-        <CardBody>
-          <div className="grid gap-6">
-            <div className="grid gap-1">
-              <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Phone</div>
-              <div className="font-body">{row.phoneNumber}</div>
-            </div>
-
-            <div className="grid gap-2">
-              <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Vision</div>
-              <div className="rounded-2xl border border-slateGrey/15 bg-white/45 px-4 py-3 font-body">
-                {row.vision?.trim() || "No vision details provided."}
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Availability</div>
-              <div className="rounded-2xl border border-slateGrey/15 bg-white/45 px-4 py-3 font-body">{formatAvailability(row)}</div>
-            </div>
-
-            <div className="grid gap-3">
-              <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Inspiration photos</div>
-              {row.photoDataUrls.length === 0 ? (
-                <div className="rounded-2xl border border-slateGrey/15 bg-white/45 px-4 py-3 font-body text-sm opacity-75">No photos uploaded.</div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  {row.photoDataUrls.map((src, idx) => (
-                    <div key={`${idx}`} className="overflow-hidden rounded-xl border border-slateGrey/15 bg-white/45">
-                      <img src={src} alt={`inspiration ${idx + 1}`} className="aspect-square w-full object-cover" />
-                    </div>
-                  ))}
-                </div>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="font-display tracking-pepla text-xs uppercase opacity-80">Thread</div>
+              <div className="font-body mt-2 text-2xl">{displayName}</div>
+              {row.customerId && (
+                <Link
+                  to={`/customers/${row.customerId}`}
+                  className="mt-1 inline-block font-body text-sm text-slateGrey/70 underline decoration-slateGrey/25 underline-offset-4 hover:text-slateGrey"
+                >
+                  View customer in CRM
+                </Link>
               )}
             </div>
-
-            {row.status === "accepted" && (
-              <div className="grid gap-4 border-t border-slateGrey/15 pt-4">
-                <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Send client proposal</div>
-                <p className="font-body text-sm opacity-75">
-                  Send the link below after you record the service and offered times. The calendar only blocks once the
-                  client has chosen a time <span className="font-medium">and</span> their deposit is marked received
-                  (payment hook later).
-                </p>
-
-                {row.proposal && (
-                  <div className="grid gap-3">
-                    <div className="rounded-2xl border border-slateGrey/15 bg-white/40 px-4 py-3">
-                      <div className="font-body text-sm">
-                        <span className="opacity-70">Client link</span>
+            <span
+              className="rounded-md px-2.5 py-1 font-display text-[10px] font-medium uppercase tracking-pepla"
+              style={{ backgroundColor: "var(--color-background-secondary)" }}
+            >
+              {tabLabel[row.status]}
+            </span>
+          </div>
+        </CardHeader>
+        <CardBody className="grid gap-8">
+          <details className="group rounded-2xl border border-slateGrey/15 bg-white/35">
+            <summary className="cursor-pointer list-none px-4 py-3 font-display text-xs uppercase tracking-pepla text-slateGrey/80 marker:content-none [&::-webkit-details-marker]:hidden">
+              <span className="flex items-center justify-between gap-2">
+                <span>Original request</span>
+                <span className="text-[10px] font-normal opacity-60 group-open:hidden">Show</span>
+                <span className="hidden text-[10px] font-normal opacity-60 group-open:inline">Hide</span>
+              </span>
+            </summary>
+            <div className="grid gap-4 border-t border-slateGrey/10 px-4 pb-4 pt-3">
+              <div className="grid gap-1">
+                <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Phone</div>
+                <div className="font-body">{row.phoneNumber}</div>
+              </div>
+              <div className="grid gap-2">
+                <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Vision</div>
+                <div className="rounded-xl border border-slateGrey/10 bg-white/50 px-3 py-2.5 font-body text-sm">
+                  {row.vision?.trim() || "No vision details provided."}
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Availability</div>
+                <div className="rounded-xl border border-slateGrey/10 bg-white/50 px-3 py-2.5 font-body text-sm">{formatAvailability(row)}</div>
+              </div>
+              <div className="grid gap-2">
+                <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Inspiration photos</div>
+                {row.photoDataUrls.length === 0 ? (
+                  <div className="rounded-xl border border-slateGrey/10 bg-white/50 px-3 py-2.5 font-body text-sm opacity-75">No photos uploaded.</div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                    {row.photoDataUrls.map((src, idx) => (
+                      <div key={`${idx}`} className="overflow-hidden rounded-lg border border-slateGrey/10 bg-white/50">
+                        <img src={src} alt={`inspiration ${idx + 1}`} className="aspect-square w-full object-cover" />
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <code className="max-w-full overflow-x-auto rounded-lg bg-white/60 px-2 py-1 font-body text-xs">
-                          {clientProposalUrl}
-                        </code>
-                        <Button type="button" variant="ghost" size="sm" onClick={() => void copyClientLink()}>
-                          {copyDone ? "Copied" : "Copy"}
-                        </Button>
-                      </div>
-                    </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </details>
 
-                    <div className="rounded-2xl border border-slateGrey/15 bg-white/40 px-4 py-3">
-                      <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Deposit & client pick</div>
-                      <div className="mt-3 grid gap-2 font-body text-sm">
-                        <div>
-                          <span className="opacity-70">Deposit: </span>
-                          {row.proposal.depositPaid ? (
-                            <span className="font-medium text-slateGrey">Received</span>
-                          ) : (
-                            <span className="opacity-80">Not received</span>
-                          )}
+          <section className="grid gap-3">
+            <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Conversation</div>
+            {sortedMessages.length === 0 ? (
+              <div className="rounded-2xl border border-slateGrey/15 bg-white/40 px-4 py-8 text-center font-body text-sm text-slateGrey/65">
+                No messages yet. Replies and automated updates will appear here.
+              </div>
+            ) : (
+              <ul className="grid gap-3">
+                {sortedMessages.map((m) => {
+                  const isProvider = m.sender === "provider";
+                  return (
+                    <li
+                      key={m.id}
+                      className={["flex", isProvider ? "justify-end" : "justify-start"].join(" ")}
+                    >
+                      <div
+                        className={[
+                          "max-w-[min(100%,28rem)] rounded-2xl border px-3.5 py-2.5",
+                          isProvider ? "border-sky/40 bg-sky/90" : "border-slateGrey/15 bg-white/60"
+                        ].join(" ")}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-display text-[10px] uppercase tracking-pepla text-slateGrey/55">
+                            {isProvider ? "You" : "Client"}
+                          </span>
+                          <span className="rounded bg-black/[0.06] px-1.5 py-0.5 font-display text-[9px] uppercase tracking-pepla text-slateGrey/60">
+                            {contentTypeLabel(m.contentType)}
+                          </span>
+                          <span className="ml-auto font-body text-[11px] text-slateGrey/50">{formatThreadTime(m.at)}</span>
                         </div>
-                        {row.proposal.pendingSlotISO && (
-                          <div>
-                            <span className="opacity-70">Client’s preferred time: </span>
-                            <span className="font-medium text-slateGrey">{formatProposalSlot(row.proposal.pendingSlotISO)}</span>
-                          </div>
-                        )}
+                        {m.body.trim() ? (
+                          <p className="mt-1.5 whitespace-pre-wrap font-body text-sm text-slateGrey">{m.body}</p>
+                        ) : null}
                       </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          disabled={depositBusy || row.proposal.depositPaid}
-                          onClick={() => void markDepositPaid(true)}
-                        >
-                          Mark deposit received
-                        </Button>
-                        {row.proposal.depositPaid && (
-                          <Button type="button" variant="ghost" size="sm" disabled={depositBusy} onClick={() => void markDepositPaid(false)}>
-                            Undo (demo)
-                          </Button>
-                        )}
-                      </div>
-                      {depositError && <div className="mt-2 font-body text-sm text-deepRed">{depositError}</div>}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          {row.status === "accepted" && row.proposal && (
+            <div className="rounded-2xl border border-slateGrey/15 bg-white/40 px-4 py-3 font-body text-sm">
+              <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Client proposal link</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <code className="max-w-full overflow-x-auto rounded-lg bg-white/60 px-2 py-1 text-xs">{clientProposalUrl}</code>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void navigator.clipboard.writeText(clientProposalUrl)}
+                >
+                  Copy
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <section
+            className="grid gap-4 border-t border-slateGrey/15 pt-6"
+            aria-label="Provider actions"
+          >
+            {row.status === "requests" && (
+              <>
+                {slotOfferOpen && (
+                  <div className="rounded-2xl border border-dashed border-slateGrey/25 bg-white/50 px-4 py-5">
+                    <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Offer time slots</div>
+                    <p className="mt-2 font-body text-sm text-slateGrey/75">
+                      Slot selection UI will go here (calendar picks, duration, and send to client).
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button type="button" size="sm" disabled={busy} onClick={() => void confirmAcceptAfterPlaceholder()}>
+                        Mark as accepted
+                      </Button>
+                      <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setSlotOfferOpen(false)}>
+                        Cancel
+                      </Button>
                     </div>
                   </div>
                 )}
 
-                <form className="grid gap-4" onSubmit={(e) => void submitProposal(e)}>
-                  <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-                    <div className="grid gap-1">
-                      <Label htmlFor="prop-service">Service</Label>
-                      <Input
-                        id="prop-service"
-                        value={serviceName}
-                        onChange={(e) => setServiceName(e.target.value)}
-                        placeholder="e.g. Fine line — small"
-                        required
-                      />
-                    </div>
-                    <div className="grid gap-1">
-                      <Label htmlFor="prop-duration">Duration (minutes)</Label>
-                      <Input
-                        id="prop-duration"
-                        type="number"
-                        min={15}
-                        step={5}
-                        value={durationMins}
-                        onChange={(e) => setDurationMins(Number(e.target.value) || 45)}
-                        required
-                      />
-                    </div>
-                    <div className="grid gap-1">
-                      <Label htmlFor="prop-price">Price ($)</Label>
-                      <Input
-                        id="prop-price"
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={price}
-                        onChange={(e) => setPrice(Number(e.target.value) || 0)}
-                        required
-                      />
-                    </div>
-                    <div className="grid gap-1">
-                      <Label htmlFor="prop-deposit">Deposit ($)</Label>
-                      <Input
-                        id="prop-deposit"
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={deposit}
-                        onChange={(e) => setDeposit(Number(e.target.value) || 0)}
-                        required
-                      />
-                    </div>
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" disabled={busy || slotOfferOpen} onClick={() => setSlotOfferOpen(true)}>
+                    Accept
+                  </Button>
+                  <Button type="button" variant="ghost" disabled={busy} onClick={() => void onDeny()}>
+                    Deny
+                  </Button>
+                </div>
 
-                  <div className="grid gap-2">
-                    <Label>Proposed times</Label>
-                    <div className="grid gap-2">
-                      {slotRows.map((r) => (
-                        <div key={r.key} className="flex flex-wrap items-end gap-2">
-                          <div className="grid min-w-[9rem] flex-1 gap-1">
-                            <span className="font-display text-[10px] uppercase tracking-pepla opacity-60">Date</span>
-                            <Input type="date" value={r.date} onChange={(e) => setSlotRows((rows) => rows.map((x) => (x.key === r.key ? { ...x, date: e.target.value } : x)))} required />
-                          </div>
-                          <div className="grid w-28 gap-1">
-                            <span className="font-display text-[10px] uppercase tracking-pepla opacity-60">Time</span>
-                            <Input type="time" value={r.time} onChange={(e) => setSlotRows((rows) => rows.map((x) => (x.key === r.key ? { ...x, time: e.target.value } : x)))} required />
-                          </div>
-                          <Button type="button" variant="ghost" size="sm" className="mb-0.5" onClick={() => removeSlotRow(r.key)}>
-                            Remove
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                    <Button type="button" variant="ghost" size="sm" className="w-fit" onClick={addSlotRow}>
-                      Add time slot
-                    </Button>
-                  </div>
-
-                  {proposalError && <div className="font-body text-sm text-deepRed">{proposalError}</div>}
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button type="submit" disabled={proposalBusy}>
-                      {row.proposal ? "Update proposal" : "Send proposal"}
-                    </Button>
-                    <Button type="button" variant="ghost" onClick={() => moveTo("upcoming")} disabled={busy || proposalBusy}>
-                      Skip proposal · mark upcoming
+                <form className="grid gap-2" onSubmit={(e) => void sendReply(e)}>
+                  <Label htmlFor="thread-reply">Reply to client</Label>
+                  <Textarea
+                    id="thread-reply"
+                    value={replyDraft}
+                    onChange={(e) => setReplyDraft(e.target.value)}
+                    rows={3}
+                    placeholder="Type a message…"
+                    className="resize-y rounded-2xl border-slateGrey/20 bg-white/60"
+                  />
+                  <div className="flex justify-end">
+                    <Button type="submit" variant="ghost" size="sm" disabled={busy || !replyDraft.trim()}>
+                      Send reply
                     </Button>
                   </div>
                 </form>
+              </>
+            )}
+
+            {row.status === "accepted" && (
+              <div className="grid gap-4">
+                <div>
+                  <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Offered slots</div>
+                  {row.slots.length === 0 ? (
+                    <p className="mt-2 font-body text-sm text-slateGrey/70">
+                      No slots on file yet. Slot selection and sending offers will plug in here.
+                    </p>
+                  ) : (
+                    <ul className="mt-2 grid gap-2">
+                      {row.slots.map((s) => (
+                        <li
+                          key={s.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slateGrey/15 bg-white/50 px-3 py-2.5 font-body text-sm"
+                        >
+                          <span>{formatSlotLine(s.startISO, s.durationMins)}</span>
+                          <span className="font-display text-[10px] uppercase tracking-pepla text-slateGrey/60">{s.status}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {row.bookingDetails && (
+                  <div className="rounded-2xl border border-slateGrey/15 bg-white/45 px-4 py-3">
+                    <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Booking details</div>
+                    <dl className="mt-3 grid gap-2 font-body text-sm">
+                      <div className="flex justify-between gap-4">
+                        <dt className="text-slateGrey/65">Service</dt>
+                        <dd className="font-medium text-slateGrey">{row.bookingDetails.serviceLabel}</dd>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <dt className="text-slateGrey/65">Deposit</dt>
+                        <dd className="font-medium text-slateGrey">${row.bookingDetails.depositAmount}</dd>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <dt className="text-slateGrey/65">Payment</dt>
+                        <dd className="font-medium text-slateGrey">{row.bookingDetails.paymentStatus}</dd>
+                      </div>
+                    </dl>
+                    <p className="mt-3 font-body text-xs text-slateGrey/55">Payment capture and adjustments — placeholder.</p>
+                  </div>
+                )}
+
+                <Button type="button" variant="ghost" size="sm" className="w-fit" disabled>
+                  Edit slot offer (coming soon)
+                </Button>
               </div>
             )}
 
-            {(row.status === "requests" || row.status === "upcoming") && (
-              <div className="flex items-center gap-3 border-t border-slateGrey/15 pt-4">
-                {row.status === "requests" && (
-                  <Button onClick={() => moveTo("accepted")} disabled={busy}>
-                    Accept
-                  </Button>
-                )}
+            {(row.status === "upcoming" || row.status === "completed" || row.status === "denied") && (
+              <div className="font-body text-sm text-slateGrey/75">
+                {row.status === "denied" && <p>This request was denied. No further provider actions.</p>}
+                {row.status === "completed" && <p>This thread is marked completed.</p>}
                 {row.status === "upcoming" && (
-                  <div className="font-body text-sm opacity-70">
-                    <p>This intake is already marked as upcoming.</p>
-                    {row.proposal?.selectedSlotISO && (
-                      <p className="mt-2 font-medium text-slateGrey">
-                        Booked: {formatProposalSlot(row.proposal.selectedSlotISO)}
-                      </p>
-                    )}
-                  </div>
+                  <p>
+                    This booking is on the calendar.
+                    {row.proposal?.selectedSlotISO ? (
+                      <span className="mt-2 block font-medium text-slateGrey">
+                        {formatSlotLine(row.proposal.selectedSlotISO, row.proposal.durationMins)}
+                      </span>
+                    ) : null}
+                  </p>
                 )}
+                <Button type="button" variant="ghost" size="sm" className="mt-4" onClick={() => void refresh()}>
+                  Refresh thread
+                </Button>
               </div>
             )}
-          </div>
+          </section>
         </CardBody>
       </Card>
     </div>
   );
 }
-

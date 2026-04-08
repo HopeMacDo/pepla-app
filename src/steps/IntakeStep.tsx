@@ -74,9 +74,11 @@ export default function IntakeStep() {
     setBusy(true);
     try {
       const customerName = `${firstName.trim()} ${lastName.trim()}`.trim();
+      const now = new Date().toISOString();
       const req: IntakeRequest = {
         id: crypto.randomUUID(),
-        createdAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
         customerName,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
@@ -85,7 +87,9 @@ export default function IntakeStep() {
         availability: formatAvailability(),
         availabilitySelections: availability,
         photoDataUrls: photos,
-        status: "requests"
+        status: "requests",
+        messages: [],
+        slots: []
       };
       await putIntake(req);
       navigate(`/calendar?name=${encodeURIComponent(req.customerName)}&phone=${encodeURIComponent(req.phoneNumber)}`);

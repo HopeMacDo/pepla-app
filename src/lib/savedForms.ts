@@ -56,8 +56,8 @@ export type SavedForm = {
 };
 
 export const DEFAULT_OPTIONS = () => ["", ""];
-export const DEFAULT_ROWS = () => ["Row 1"];
-export const DEFAULT_COLS = () => ["Column 1", "Column 2"];
+export const DEFAULT_ROWS = () => [""];
+export const DEFAULT_COLS = () => ["", ""];
 
 export function needsOptions(k: QuestionKind) {
   return k === "multiple_choice" || k === "checkboxes" || k === "dropdown";

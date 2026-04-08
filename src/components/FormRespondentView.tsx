@@ -517,7 +517,7 @@ function QuestionRespondent({
                             checked={g[String(ri)] === ci}
                             onChange={() => setCol(ri, ci)}
                             className="h-4 w-4 border-slateGrey/35 accent-slateGrey"
-                            aria-label={`${row} — ${block.colLabels[ci]}`}
+                            aria-label={`${row.trim() || `Row ${ri + 1}`} — ${block.colLabels[ci].trim() || `Column ${ci + 1}`}`}
                           />
                         </td>
                       ))}
@@ -572,7 +572,7 @@ function QuestionRespondent({
                             checked={(g[String(ri)] ?? []).includes(ci)}
                             onChange={() => toggle(ri, ci)}
                             className="h-4 w-4 rounded border-slateGrey/35 accent-slateGrey"
-                            aria-label={`${row} — ${block.colLabels[ci]}`}
+                            aria-label={`${row.trim() || `Row ${ri + 1}`} — ${block.colLabels[ci].trim() || `Column ${ci + 1}`}`}
                           />
                         </td>
                       ))}

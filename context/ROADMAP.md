@@ -74,3 +74,12 @@ Tue Mar 31
 Goal:
 - intuitive booking and calendar blocks
 - minimalist booking pages with client search and smart times
+
+
+Mon Apr 6
+- forms tab in setting: build a form, "your forms", etc.
+- pepla logo, design clean-up... again
+- inbox design clean-up
+
+Goal:
+- customizable forms; build and edit
