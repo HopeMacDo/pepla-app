@@ -17,6 +17,11 @@ import CustomersListStep from "./steps/CustomersListStep";
 import AdminDashboardStep from "./steps/AdminDashboardStep";
 import IntakeDetailStep from "./steps/IntakeDetailStep";
 import ClientProposalStep from "./steps/ClientProposalStep";
+import ClientBookingLinkStep from "./steps/ClientBookingLinkStep";
+import CalendarCreateSpotPage from "./pages/CalendarCreateSpotPage";
+import InboxNewOfferPage from "./pages/InboxNewOfferPage";
+import ServicesListPage from "./pages/ServicesListPage";
+import ServiceEditorPage from "./pages/ServiceEditorPage";
 
 function RedirectCrmCustomer() {
   const { id } = useParams();
@@ -65,6 +70,7 @@ export default function App() {
 
   const initialRoute = useMemo(() => sp.get("start")?.toLowerCase() ?? null, [sp]);
   const clientProposalView = location.pathname.startsWith("/proposal/");
+  const clientBookingLinkView = location.pathname.startsWith("/book/");
 
   useEffect(() => {
     if (!initialRoute) return;
@@ -75,11 +81,12 @@ export default function App() {
     navigate(`/${mapped}${qs ? `?${qs}` : ""}`, { replace: true });
   }, [initialRoute, navigate, sp]);
 
-  if (clientProposalView) {
+  if (clientProposalView || clientBookingLinkView) {
     return (
       <div className="min-h-screen bg-[#0c0a08] text-white antialiased">
         <Routes>
           <Route path="/proposal/:id" element={<ClientProposalStep />} />
+          <Route path="/book/:token" element={<ClientBookingLinkStep />} />
           <Route path="*" element={<Navigate to="/today" replace />} />
         </Routes>
       </div>
@@ -111,9 +118,11 @@ export default function App() {
       <Route element={<MainLayout />}>
         <Route path="/today" element={<TodayPage />} />
         <Route path="/inbox" element={<AdminDashboardStep />} />
+        <Route path="/inbox/new-offer" element={<InboxNewOfferPage />} />
         <Route path="/inbox/intake/:id" element={<IntakeDetailStep />} />
         <Route path="/calendar" element={<CalendarStep />} />
         <Route path="/calendar/new" element={<CalendarNewBookingPage />} />
+        <Route path="/calendar/spot" element={<CalendarCreateSpotPage />} />
         <Route path="/calendar/block" element={<CalendarBlockTimePage />} />
         <Route path="/customers" element={<CustomersListStep />} />
         <Route path="/customers/:id" element={<CustomerDetailStep />} />
@@ -125,6 +134,8 @@ export default function App() {
           <Route path="preview" element={<FormPreviewTab />} />
           <Route path="edit" element={<FormEditorPage />} />
         </Route>
+        <Route path="/settings/services/:serviceId" element={<ServiceEditorPage />} />
+        <Route path="/settings/services" element={<ServicesListPage />} />
         <Route path="/settings/:section" element={<SettingsSectionPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

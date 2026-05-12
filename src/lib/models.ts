@@ -69,7 +69,7 @@ export const BookingProposalSchema = z.object({
   durationMins: z.number().int().positive(),
   price: z.number().nonnegative(),
   deposit: z.number().nonnegative(),
-  slotStartISOs: z.array(z.string()).min(1),
+  slotStartISOs: z.array(z.string()).min(1).max(5),
   sentAt: z.string(),
   /** Studio has recorded deposit received (or payment integration, later). */
   depositPaid: z.boolean().default(false),
@@ -99,7 +99,15 @@ export const IntakeRequestSchema = z.object({
   proposal: BookingProposalSchema.optional(),
   messages: z.array(InboxMessageSchema).default([]),
   slots: z.array(InboxSlotSchema).default([]),
-  bookingDetails: InboxBookingDetailsSchema.optional()
+  bookingDetails: InboxBookingDetailsSchema.optional(),
+  /** Demo: last card digits saved when client opts in during deposit (Stripe later). */
+  clientPaymentMethodStub: z
+    .object({
+      last4: z.string().min(4).max(4),
+      brand: z.string().optional(),
+      savedAt: z.string()
+    })
+    .optional()
 });
 export type IntakeRequest = z.infer<typeof IntakeRequestSchema>;
 
@@ -111,7 +119,9 @@ export const AppointmentSchema = z.object({
   id: z.string(),
   startISO: z.string(),
   endISO: z.string(),
-  kind: z.enum(["appointment", "block"]).default("appointment"),
+  kind: z.enum(["appointment", "block", "spot_hold"]).default("appointment"),
+  /** When `kind` is `spot_hold`, ties the calendar block to a shareable Spot link. */
+  bookingLinkId: z.string().optional(),
   customerId: z.string().optional(),
   customerName: z.string().min(1),
   phoneNumber: z.string().optional(),
@@ -120,4 +130,61 @@ export const AppointmentSchema = z.object({
   notes: z.string().optional()
 });
 export type Appointment = z.infer<typeof AppointmentSchema>;
+
+export const BookingLinkKindSchema = z.enum(["spot", "offer"]);
+export type BookingLinkKind = z.infer<typeof BookingLinkKindSchema>;
+
+export const BookingLinkStatusSchema = z.enum(["active", "fulfilled", "expired", "cancelled"]);
+export type BookingLinkStatus = z.infer<typeof BookingLinkStatusSchema>;
+
+/** Saved studio service for offers, booking, and public spots. */
+export const ServiceCatalogItemSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1),
+  durationMins: z.number().int().positive(),
+  price: z.number().nonnegative(),
+  /** When false, price may be hidden on client-facing surfaces (future). */
+  priceDisplayOnline: z.boolean().default(true),
+  description: z.string().default(""),
+  /** Default deposit amount in dollars when prefilling offers / spots. */
+  depositAmount: z.number().nonnegative().default(0),
+  /** Policy copy (non-refundable, due at booking, etc.). */
+  depositRequirements: z.string().default(""),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+export type ServiceCatalogItem = z.infer<typeof ServiceCatalogItemSchema>;
+
+/** Shareable Spot (public opening) or Offer (private options for one client). */
+export const BookingLinkSchema = z.object({
+  id: z.string(),
+  /** URL segment for `/book/:token` — not derived from intake ids. */
+  token: z.string().min(8),
+  kind: BookingLinkKindSchema,
+  status: BookingLinkStatusSchema.default("active"),
+  /** Offer links always point at an inbox thread in `accepted` with a proposal. */
+  intakeId: z.string().optional(),
+  /** After a Spot is claimed, the new inbox thread id. */
+  fulfilledIntakeId: z.string().optional(),
+  providerDisplayName: z.string().min(1),
+  serviceName: z.string().min(1),
+  durationMins: z.number().int().positive(),
+  price: z.number().nonnegative(),
+  deposit: z.number().nonnegative(),
+  slotStartISOs: z.array(z.string()).min(1).max(5),
+  /** Link expiry (optional). */
+  expiresAt: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  /** Spot: calendar hold id; cleared when fulfilled or expired. */
+  holdAppointmentId: z.string().optional(),
+  /** Client picked slot (spot) or pending confirmation (offer deposit step). */
+  pendingSlotISO: z.string().optional(),
+  /** Spot/offer: deposit collected (or waived when deposit is 0). */
+  depositPaid: z.boolean().optional(),
+  spotClaimFirstName: z.string().optional(),
+  spotClaimLastName: z.string().optional(),
+  spotClaimPhone: z.string().optional()
+});
+export type BookingLink = z.infer<typeof BookingLinkSchema>;
 

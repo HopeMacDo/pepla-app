@@ -140,11 +140,19 @@ export default function AdminDashboardStep() {
     <div className="grid gap-6">
       <Card>
         <CardHeader>
-          <div
-            className="text-2xl font-normal italic leading-snug tracking-[-0.01em] text-slateGrey"
-            style={{ fontFamily: '"Times New Roman", Times, serif' }}
-          >
-            Inbox
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div
+              className="text-2xl font-normal italic leading-snug tracking-[-0.01em] text-slateGrey"
+              style={{ fontFamily: '"Times New Roman", Times, serif' }}
+            >
+              Inbox
+            </div>
+            <Link
+              to="/inbox/new-offer"
+              className="shrink-0 font-display text-xs uppercase tracking-pepla text-slateGrey/70 underline decoration-slateGrey/25 underline-offset-4 hover:decoration-slateGrey/50"
+            >
+              New offer
+            </Link>
           </div>
         </CardHeader>
         <CardBody>

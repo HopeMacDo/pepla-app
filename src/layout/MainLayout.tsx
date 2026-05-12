@@ -46,6 +46,7 @@ export default function MainLayout() {
                   sidebarLink,
                   isActive ||
                     (to === "/calendar" && pathname.startsWith("/calendar")) ||
+                    (to === "/inbox" && pathname.startsWith("/inbox")) ||
                     (to === "/settings" && pathname.startsWith("/settings"))
                     ? sidebarActive
                     : sidebarInactive
@@ -81,6 +82,7 @@ export default function MainLayout() {
                 bottomLink,
                 (isActive ||
                   (to === "/calendar" && pathname.startsWith("/calendar")) ||
+                  (to === "/inbox" && pathname.startsWith("/inbox")) ||
                   (to === "/settings" && pathname.startsWith("/settings"))) &&
                   bottomActive
               )

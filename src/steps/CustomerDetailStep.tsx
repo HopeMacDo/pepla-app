@@ -72,6 +72,15 @@ export default function CustomerDetailStep() {
             <p className="mt-3 font-body text-sm text-slateGrey/70">
               {toTrimmedString(customer.phone_number) || "No phone on file"}
             </p>
+            <Link
+              to={`/inbox/new-offer?customerId=${encodeURIComponent(customer.id)}`}
+              className="mt-6 inline-block font-display text-xs uppercase tracking-pepla text-slateGrey underline decoration-slateGrey/25 underline-offset-4 hover:decoration-slateGrey/50"
+            >
+              New booking offer
+            </Link>
+            <p className="mt-2 max-w-sm font-body text-xs text-slateGrey/55">
+              Opens the offer composer for an accepted inbox thread linked to this customer.
+            </p>
           </div>
         )}
       </div>

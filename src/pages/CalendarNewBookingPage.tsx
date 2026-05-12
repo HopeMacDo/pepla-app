@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Input, Label, Textarea } from "../ui/primitives";
-import type { Appointment } from "../lib/models";
-import { listAppointments, putAppointment } from "../lib/storage";
+import type { Appointment, ServiceCatalogItem } from "../lib/models";
+import { listAppointments, listCatalogServices, putAppointment } from "../lib/storage";
 import { CUSTOMERS_TABLE, toTrimmedString, type Customer } from "@/lib/customers";
 import { formatSupabaseError, supabase } from "@/lib/supabase";
 import {
@@ -66,6 +66,9 @@ export default function CalendarNewBookingPage() {
   const [newStartTime, setNewStartTime] = useState(() => sp.get("time") ?? timeHHMMRoundedNow(15));
   const [durationMins, setDurationMins] = useState(() => Number(sp.get("duration") ?? 60));
 
+  const [catalog, setCatalog] = useState<ServiceCatalogItem[]>([]);
+  const [selectedCatalogId, setSelectedCatalogId] = useState<"" | "custom" | string>("");
+
   const [serviceName, setServiceName] = useState(() => sp.get("service") ?? "");
   const [priceInput, setPriceInput] = useState(() => sp.get("price") ?? "");
   const [notes, setNotes] = useState("");
@@ -104,6 +107,7 @@ export default function CalendarNewBookingPage() {
   useEffect(() => {
     (async () => {
       setAppointments(await listAppointments());
+      setCatalog(await listCatalogServices());
     })();
   }, []);
 
@@ -132,6 +136,22 @@ export default function CalendarNewBookingPage() {
       cancelled = true;
     };
   }, [loadCustomers]);
+
+  const serviceFromUrl = sp.get("service") ?? "";
+
+  useEffect(() => {
+    if (!serviceFromUrl.trim() || catalog.length === 0) return;
+    const match = catalog.find((s) => s.name === serviceFromUrl.trim());
+    if (match) {
+      setSelectedCatalogId(match.id);
+      setServiceName(match.name);
+      setDurationMins(match.durationMins);
+      setPriceInput(match.price ? String(match.price) : "");
+    } else {
+      setSelectedCatalogId("custom");
+      setServiceName(serviceFromUrl.trim());
+    }
+  }, [catalog, serviceFromUrl]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -381,15 +401,43 @@ export default function CalendarNewBookingPage() {
               <Label htmlFor="new-appt-service">Service</Label>
               <select
                 id="new-appt-service"
-                value={serviceName}
-                onChange={(e) => setServiceName(e.target.value)}
+                value={selectedCatalogId}
+                onChange={(e) => {
+                  const v = e.target.value as "" | "custom" | string;
+                  setSelectedCatalogId(v);
+                  if (v === "") {
+                    setServiceName("");
+                    return;
+                  }
+                  if (v === "custom") {
+                    setServiceName("");
+                    return;
+                  }
+                  const s = catalog.find((x) => x.id === v);
+                  if (s) {
+                    setServiceName(s.name);
+                    setDurationMins(s.durationMins);
+                    setPriceInput(s.price ? String(s.price) : "");
+                  }
+                }}
                 className="h-10 w-full rounded-none border-0 border-b border-slateGrey/25 bg-transparent px-0 font-body text-[15px] outline-none focus:border-slateGrey/45"
               >
                 <option value="">Select a service</option>
-                <option value="Tattoo appointment">Tattoo appointment</option>
-                <option value="Consultation">Consultation</option>
-                <option value="Touch-up">Touch-up</option>
+                {catalog.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+                <option value="custom">Custom…</option>
               </select>
+              {selectedCatalogId === "custom" && (
+                <Input
+                  value={serviceName}
+                  onChange={(e) => setServiceName(e.target.value)}
+                  placeholder="Service name"
+                  className="mt-2 rounded-none border-0 border-b border-slateGrey/25 bg-transparent px-0 placeholder:text-slateGrey/35 focus:border-slateGrey/45"
+                />
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="new-appt-dur">Duration</Label>

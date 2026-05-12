@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Button, Card, CardBody, CardHeader, Label, Textarea } from "../ui/primitives";
 import type { IntakeRequest, IntakeStatus } from "../lib/models";
-import { appendInboxMessage, getIntakeById, updateIntakeStatus } from "../lib/storage";
+import { appendInboxMessage, getActiveOfferTokenForIntake, getIntakeById, updateIntakeStatus } from "../lib/storage";
 
 const tabLabel: Record<IntakeStatus, string> = {
   requests: "Requests",
@@ -67,11 +67,14 @@ export default function IntakeDetailStep() {
   const [busy, setBusy] = useState(false);
   const [replyDraft, setReplyDraft] = useState("");
   const [slotOfferOpen, setSlotOfferOpen] = useState(false);
+  const [clientBookUrl, setClientBookUrl] = useState<string | null>(null);
 
   const clientProposalUrl = useMemo(() => {
     if (!id || typeof window === "undefined") return "";
     return `${window.location.origin}/proposal/${id}`;
   }, [id]);
+
+  const shareClientUrl = clientBookUrl ?? clientProposalUrl;
 
   const backTab = useMemo<IntakeStatus>(() => {
     const raw = (sp.get("tab") ?? "requests").toLowerCase() as IntakeStatus;
@@ -89,6 +92,21 @@ export default function IntakeDetailStep() {
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !row?.proposal) {
+      setClientBookUrl(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const t = await getActiveOfferTokenForIntake(id);
+      if (!cancelled) setClientBookUrl(t ? `${window.location.origin}/book/${t}` : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, row?.proposal, row?.updatedAt]);
 
   async function refresh() {
     if (!id) return;
@@ -272,18 +290,23 @@ export default function IntakeDetailStep() {
 
           {row.status === "accepted" && row.proposal && (
             <div className="rounded-2xl border border-slateGrey/15 bg-white/40 px-4 py-3 font-body text-sm">
-              <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Client proposal link</div>
+              <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Client booking link</div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <code className="max-w-full overflow-x-auto rounded-lg bg-white/60 px-2 py-1 text-xs">{clientProposalUrl}</code>
+                <code className="max-w-full overflow-x-auto rounded-lg bg-white/60 px-2 py-1 text-xs">{shareClientUrl}</code>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => void navigator.clipboard.writeText(clientProposalUrl)}
+                  onClick={() => void navigator.clipboard.writeText(shareClientUrl)}
                 >
                   Copy
                 </Button>
               </div>
+              {!clientBookUrl && (
+                <p className="mt-2 font-body text-xs text-slateGrey/55">
+                  Legacy link (intake id). Send a fresh offer to get a private token link.
+                </p>
+              )}
             </div>
           )}
 
@@ -340,11 +363,21 @@ export default function IntakeDetailStep() {
 
             {row.status === "accepted" && (
               <div className="grid gap-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Link
+                    to={`/inbox/new-offer?intake=${id}`}
+                    className="font-display text-xs uppercase tracking-pepla text-slateGrey underline decoration-slateGrey/25 underline-offset-4 hover:decoration-slateGrey/50"
+                  >
+                    New offer
+                  </Link>
+                  <span className="font-body text-xs text-slateGrey/55">Send up to 5 times with a private link.</span>
+                </div>
                 <div>
                   <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Offered slots</div>
                   {row.slots.length === 0 ? (
                     <p className="mt-2 font-body text-sm text-slateGrey/70">
-                      No slots on file yet. Slot selection and sending offers will plug in here.
+                      No active offer yet. Use <span className="font-medium">New offer</span> to pick times and email a
+                      link.
                     </p>
                   ) : (
                     <ul className="mt-2 grid gap-2">

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Input, Label, Textarea } from "../ui/primitives";
 import { ScrollingMonthCalendarDialog } from "../ui/ScrollingMonthCalendarDialog";
 import type { Appointment } from "../lib/models";
-import { deleteAppointment, listAppointments, putAppointment } from "../lib/storage";
+import { deleteAppointment, listAppointments, putAppointment, sweepExpiredBookingLinks } from "../lib/storage";
 
 type CalendarViewMode = "month" | "week" | "day";
 
@@ -121,6 +121,20 @@ function layoutApptInWeekGrid(a: Appointment): { top: number; height: number } |
 
 function weekApptVariant(id: string) {
   return id.charCodeAt(0) % 2 === 0 ? "solid" : "soft";
+}
+
+function apptBlockClasses(a: Appointment): string {
+  const base =
+    "pointer-events-auto absolute left-0 right-0 flex min-h-0 flex-col overflow-hidden px-1.5 py-1 text-left";
+  if (a.kind === "spot_hold") {
+    return `${base} rounded-md border-2 border-dashed border-[#c59e6f] bg-[#fdf6ed]/95 text-[#5c4a32] shadow-sm transition hover:brightness-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c59e6f]/40`;
+  }
+  const v = weekApptVariant(a.id);
+  return [
+    base,
+    "rounded-md shadow-sm transition hover:brightness-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C1618]/35",
+    v === "solid" ? "bg-[#7C1618] text-white" : "border border-[#7C1618]/25 bg-white/80 text-[#7C1618]"
+  ].join(" ");
 }
 
 function sameDay(a: Date, b: Date) {
@@ -272,6 +286,7 @@ export default function CalendarStep() {
 
   useEffect(() => {
     (async () => {
+      await sweepExpiredBookingLinks();
       const existing = await listAppointments();
       if (existing.length === 0) {
         const seedMonth = new Date();
@@ -493,6 +508,7 @@ export default function CalendarStep() {
   const canCreate = useMemo(() => Boolean(customerName.trim() && !busy), [busy, customerName]);
 
   async function refresh() {
+    await sweepExpiredBookingLinks();
     setAppointments(await listAppointments());
   }
 
@@ -818,6 +834,21 @@ export default function CalendarStep() {
                     qs.set("date", selectedDate);
                     qs.set("time", newStartTime);
                     qs.set("duration", String(durationMins));
+                    navigate(`/calendar/spot?${qs.toString()}`);
+                  }}
+                >
+                  Create Spot
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left font-display text-[11px] uppercase tracking-pepla text-slateGrey/80 transition hover:bg-white/50"
+                  onClick={() => {
+                    setPlusMenuOpen(false);
+                    const qs = new URLSearchParams();
+                    qs.set("date", selectedDate);
+                    qs.set("time", newStartTime);
+                    qs.set("duration", String(durationMins));
                     navigate(`/calendar/block?${qs.toString()}`);
                   }}
                 >
@@ -837,7 +868,7 @@ export default function CalendarStep() {
           aria-label="Slot actions"
           style={{
             left: Math.max(8, Math.min(slotMenu.x, window.innerWidth - 8 - 224)),
-            top: Math.max(8, Math.min(slotMenu.y, window.innerHeight - 8 - 96))
+            top: Math.max(8, Math.min(slotMenu.y, window.innerHeight - 8 - 140))
           }}
         >
           <button
@@ -854,6 +885,21 @@ export default function CalendarStep() {
             }}
           >
             Create new appointment
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2 px-3 py-2.5 text-left font-display text-[11px] uppercase tracking-pepla text-slateGrey/80 transition hover:bg-white/50"
+            onClick={() => {
+              const qs = new URLSearchParams();
+              qs.set("date", slotMenu.dateISO);
+              qs.set("time", slotMenu.timeHHMM);
+              qs.set("duration", String(slotMenu.durationMins));
+              setSlotMenu((s) => (s ? { ...s, open: false } : s));
+              navigate(`/calendar/spot?${qs.toString()}`);
+            }}
+          >
+            Create Spot
           </button>
           <button
             type="button"
@@ -1137,18 +1183,12 @@ export default function CalendarStep() {
                               {dayAppts.map((a) => {
                                 const layout = layoutApptInWeekGrid(a);
                                 if (!layout) return null;
-                                const v = weekApptVariant(a.id);
                                 return (
                                   <button
                                     key={a.id}
                                     type="button"
                                     style={{ top: layout.top, height: layout.height }}
-                                    className={[
-                                      "pointer-events-auto absolute left-0 right-0 flex min-h-0 flex-col overflow-hidden rounded-md px-1.5 py-1 text-left shadow-sm transition hover:brightness-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C1618]/35",
-                                      v === "solid"
-                                        ? "bg-[#7C1618] text-white"
-                                        : "border border-[#7C1618]/25 bg-white/80 text-[#7C1618]"
-                                    ].join(" ")}
+                                    className={apptBlockClasses(a)}
                                     onMouseEnter={() => setWeekSlotHover((h) => (h?.k === k ? null : h))}
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -1161,7 +1201,11 @@ export default function CalendarStep() {
                                     <span
                                       className={[
                                         "truncate font-body text-[9px] font-normal tabular-nums leading-tight",
-                                        v === "solid" ? "text-white/85" : "text-slateGrey/70"
+                                        a.kind === "spot_hold"
+                                          ? "text-[#5c4a32]/85"
+                                          : weekApptVariant(a.id) === "solid"
+                                            ? "text-white/85"
+                                            : "text-slateGrey/70"
                                       ].join(" ")}
                                     >
                                       {new Date(a.startISO).toLocaleTimeString([], {
@@ -1173,7 +1217,11 @@ export default function CalendarStep() {
                                       <span
                                         className={[
                                           "mt-0.5 line-clamp-2 font-body text-[8px] font-normal leading-snug sm:text-[9px]",
-                                          v === "solid" ? "text-white/75" : "text-slateGrey/60"
+                                          a.kind === "spot_hold"
+                                            ? "text-[#5c4a32]/70"
+                                            : weekApptVariant(a.id) === "solid"
+                                              ? "text-white/75"
+                                              : "text-slateGrey/60"
                                         ].join(" ")}
                                       >
                                         {a.notes}
@@ -1339,18 +1387,12 @@ export default function CalendarStep() {
                             {dayViewGrid.dayAppts.map((a) => {
                               const layout = layoutApptInWeekGrid(a);
                               if (!layout) return null;
-                              const v = weekApptVariant(a.id);
                               return (
                                 <button
                                   key={a.id}
                                   type="button"
                                   style={{ top: layout.top, height: layout.height }}
-                                  className={[
-                                    "pointer-events-auto absolute left-0 right-0 flex min-h-0 flex-col overflow-hidden rounded-md px-1.5 py-1 text-left shadow-sm transition hover:brightness-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C1618]/35",
-                                    v === "solid"
-                                      ? "bg-[#7C1618] text-white"
-                                      : "border border-[#7C1618]/25 bg-white/80 text-[#7C1618]"
-                                  ].join(" ")}
+                                  className={apptBlockClasses(a)}
                                   onMouseEnter={() => setWeekSlotHover((h) => (h?.k === dayViewGrid.k ? null : h))}
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -1363,7 +1405,11 @@ export default function CalendarStep() {
                                   <span
                                     className={[
                                       "truncate font-body text-[9px] font-normal tabular-nums leading-tight",
-                                      v === "solid" ? "text-white/85" : "text-slateGrey/70"
+                                      a.kind === "spot_hold"
+                                        ? "text-[#5c4a32]/85"
+                                        : weekApptVariant(a.id) === "solid"
+                                          ? "text-white/85"
+                                          : "text-slateGrey/70"
                                     ].join(" ")}
                                   >
                                     {new Date(a.startISO).toLocaleTimeString([], {
@@ -1375,7 +1421,11 @@ export default function CalendarStep() {
                                     <span
                                       className={[
                                         "mt-0.5 line-clamp-2 font-body text-[8px] font-normal leading-snug sm:text-[9px]",
-                                        v === "solid" ? "text-white/75" : "text-slateGrey/60"
+                                        a.kind === "spot_hold"
+                                          ? "text-[#5c4a32]/70"
+                                          : weekApptVariant(a.id) === "solid"
+                                            ? "text-white/75"
+                                            : "text-slateGrey/60"
                                       ].join(" ")}
                                     >
                                       {a.notes}
