@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import ClientFormBookingPanel from "../components/ClientFormBookingPanel";
 import type { BookingLink, IntakeRequest } from "../lib/models";
 import {
   claimSpotBookingLink,
@@ -214,6 +215,10 @@ export default function ClientBookingLinkStep() {
     );
   }
 
+  if (link.kind === "form") {
+    return <ClientFormBookingPanel link={link} />;
+  }
+
   const isSpot = link.kind === "spot";
   const isOffer = link.kind === "offer";
   const provider = link.providerDisplayName;
@@ -311,7 +316,7 @@ export default function ClientBookingLinkStep() {
 
               {p.deposit > 0 && !offerAwaitingDeposit && !offerBooked && (
                 <p className="mt-4 text-center font-body text-xs text-neutral-500">
-                  {formatMoney(p.deposit)} deposit collected after you confirm to hold your appointment.
+                  Confirming books your time on the calendar. In this demo, the deposit is marked received when you confirm.
                 </p>
               )}
 

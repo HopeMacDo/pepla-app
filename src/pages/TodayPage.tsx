@@ -49,7 +49,7 @@ function pickNextAppointmentId(appts: Appointment[], nowMs: number): string | nu
   return next?.id ?? null;
 }
 
-/** Demo day when the calendar has nothing today — keeps times spread across the day. */
+/** Sample clients for Today — merged with real calendar rows (non-overlapping slots only). */
 function previewAppointmentsForDay(day: Date): Appointment[] {
   const y = day.getFullYear();
   const m = day.getMonth();
@@ -76,13 +76,33 @@ function previewAppointmentsForDay(day: Date): Appointment[] {
     };
   };
   return [
+    mk(8, 0, 45, "morgan", "Morgan Wu", "Flash consult", 70),
     mk(9, 0, 60, "alex", "Alex Kim", "Consultation · placement", 85),
+    mk(10, 15, 45, "taylor", "Taylor Reed", "Stencil review", 80),
     mk(11, 30, 45, "jordan", "Jordan Lee", "Touch-up", 95),
+    mk(13, 0, 30, "avery", "Avery Bloom", "Healing check-in", 55),
     mk(14, 0, 60, "sam", "Sam Ortiz", "Session · linework", 120),
     mk(15, 30, 45, "marcus", "Marcus Chen", "Stencil review", 75),
     mk(16, 15, 45, "riley", "Riley Park", "Healing check", 65),
-    mk(17, 30, 60, "casey", "Casey Nova", "Shading pass", 140)
+    mk(17, 30, 60, "casey", "Casey Nova", "Shading pass", 140),
+    mk(18, 45, 45, "drew", "Drew Ellis", "Color touch-up", 90)
   ];
+}
+
+function intervalOverlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+function previewSlotsWithoutOverlap(real: Appointment[], previews: Appointment[]): Appointment[] {
+  return previews.filter((p) => {
+    const ps = new Date(p.startISO).getTime();
+    const pe = new Date(p.endISO).getTime();
+    return !real.some((r) => {
+      const rs = new Date(r.startISO).getTime();
+      const re = new Date(r.endISO).getTime();
+      return intervalOverlaps(ps, pe, rs, re);
+    });
+  });
 }
 
 function PinIcon({ variant }: { variant: "done" | "current" | "upcoming" }) {
@@ -170,7 +190,12 @@ export default function TodayPage() {
       .sort((a, b) => new Date(a.startISO).getTime() - new Date(b.startISO).getTime());
   }, [appointments, nowTick]);
 
-  const scheduleAppts = todayAppts.length === 0 ? previewForDay : todayAppts;
+  const scheduleAppts = useMemo(() => {
+    const extras = previewSlotsWithoutOverlap(todayAppts, previewForDay);
+    return [...todayAppts, ...extras].sort(
+      (a, b) => new Date(a.startISO).getTime() - new Date(b.startISO).getTime()
+    );
+  }, [todayAppts, previewForDay]);
 
   const pendingRequestCount = useMemo(
     () => intakes.filter((r) => r.status === "requests").length,

@@ -12,7 +12,10 @@ import type {
   ServiceCatalogItem
 } from "./models";
 import { ServiceCatalogItemSchema } from "./models";
-import { loadStudioServices } from "./studioMenu";
+import { loadStudioServices, loadStudioByline } from "./studioMenu";
+import { BOOKING_REQUEST_FORM_ID } from "./bookingRequestFormSeed";
+import { getSavedForm } from "./savedForms";
+import { defaultOrMigratePublicBookingSettings, loadPublicBookingSettings, savePublicBookingSettings } from "./publicBookingSettings";
 
 const appStore = createStore("pepla-booking", "app");
 
@@ -133,6 +136,63 @@ function seedIntake(now = new Date()): IntakeRequest[] {
     },
     {
       id: crypto.randomUUID(),
+      createdAt: mkDate(0),
+      updatedAt: mkDate(0),
+      firstName: "Skye",
+      lastName: "Torres",
+      customerName: "Skye Torres",
+      phoneNumber: "(555) 310-7721",
+      vision: "Fine-line floral band wrapping the forearm, mostly blackwork with one soft gray accent.",
+      availability: "Mornings: SAT | Afternoons: THU, FRI",
+      availabilitySelections: {
+        mornings: { tue: false, wed: false, thu: false, fri: false, sat: true },
+        afternoons: { tue: false, wed: false, thu: true, fri: true, sat: false }
+      },
+      photoDataUrls: [],
+      status: "requests",
+      messages: [],
+      slots: []
+    },
+    {
+      id: crypto.randomUUID(),
+      createdAt: mkDate(3),
+      updatedAt: mkDate(3),
+      firstName: "Dante",
+      lastName: "Vega",
+      customerName: "Dante Vega",
+      phoneNumber: "(555) 904-1183",
+      vision: "Cover-up consult on an old tribal armband — open to blackout or heavy rework.",
+      availability: "Mornings: TUE, WED | Afternoons: none",
+      availabilitySelections: {
+        mornings: { tue: true, wed: true, thu: false, fri: false, sat: false },
+        afternoons: { tue: false, wed: false, thu: false, fri: false, sat: false }
+      },
+      photoDataUrls: [],
+      status: "requests",
+      messages: [],
+      slots: []
+    },
+    {
+      id: crypto.randomUUID(),
+      createdAt: mkDate(2),
+      updatedAt: mkDate(2),
+      firstName: "Priya",
+      lastName: "Nair",
+      customerName: "Priya Nair",
+      phoneNumber: "(555) 661-4409",
+      vision: "Small script on inner bicep — three words, delicate single needle if possible.",
+      availability: "Mornings: none | Afternoons: WED, SAT",
+      availabilitySelections: {
+        mornings: { tue: false, wed: false, thu: false, fri: false, sat: false },
+        afternoons: { tue: false, wed: true, thu: false, fri: false, sat: true }
+      },
+      photoDataUrls: [],
+      status: "requests",
+      messages: [],
+      slots: []
+    },
+    {
+      id: crypto.randomUUID(),
       createdAt: mkDate(4),
       updatedAt: mkDate(4),
       firstName: "Amber",
@@ -210,6 +270,83 @@ function seedIntake(now = new Date()): IntakeRequest[] {
   ];
 }
 
+/** Stable demo rows — written in dev when IndexedDB has intakes but none in `requests` (cold seed only runs on empty store). */
+function fakePendingIntakesForDev(now = new Date()): IntakeRequest[] {
+  const iso = now.toISOString();
+  const row = (
+    id: string,
+    patch: Pick<
+      IntakeRequest,
+      | "firstName"
+      | "lastName"
+      | "customerName"
+      | "phoneNumber"
+      | "vision"
+      | "availability"
+      | "availabilitySelections"
+    >
+  ): IntakeRequest => ({
+    id,
+    createdAt: iso,
+    updatedAt: iso,
+    photoDataUrls: [],
+    status: "requests",
+    messages: [],
+    slots: [],
+    ...patch
+  });
+  return [
+    row("dev-fake-pending-1", {
+      firstName: "Rex",
+      lastName: "Morales",
+      customerName: "Rex Morales",
+      phoneNumber: "(555) 201-0091",
+      vision: "American traditional panther on outer calf, midsize.",
+      availability: "Mornings: THU | Afternoons: FRI",
+      availabilitySelections: {
+        mornings: { tue: false, wed: false, thu: true, fri: false, sat: false },
+        afternoons: { tue: false, wed: false, thu: false, fri: true, sat: false }
+      }
+    }),
+    row("dev-fake-pending-2", {
+      firstName: "Ivy",
+      lastName: "Kwon",
+      customerName: "Ivy Kwon",
+      phoneNumber: "(555) 772-4410",
+      vision: "Micro realism moth with moon phase, upper back.",
+      availability: "Mornings: SAT | Afternoons: none",
+      availabilitySelections: {
+        mornings: { tue: false, wed: false, thu: false, fri: false, sat: true },
+        afternoons: { tue: false, wed: false, thu: false, fri: false, sat: false }
+      }
+    }),
+    row("dev-fake-pending-3", {
+      firstName: "Omar",
+      lastName: "Hassan",
+      customerName: "Omar Hassan",
+      phoneNumber: "(555) 448-2201",
+      vision: "Geometric sleeve continuation — wrist to elbow, dotwork.",
+      availability: "Mornings: none | Afternoons: TUE, WED",
+      availabilitySelections: {
+        mornings: { tue: false, wed: false, thu: false, fri: false, sat: false },
+        afternoons: { tue: true, wed: true, thu: false, fri: false, sat: false }
+      }
+    }),
+    row("dev-fake-pending-4", {
+      firstName: "Cleo",
+      lastName: "James",
+      customerName: "Cleo James",
+      phoneNumber: "(555) 903-6612",
+      vision: "Walk-in flash sheet piece — smallest snake design, behind ear.",
+      availability: "Mornings: FRI | Afternoons: SAT",
+      availabilitySelections: {
+        mornings: { tue: false, wed: false, thu: false, fri: true, sat: false },
+        afternoons: { tue: false, wed: false, thu: false, fri: false, sat: true }
+      }
+    })
+  ];
+}
+
 export async function putIntake(req: IntakeRequest) {
   await set(`intake:${req.id}` satisfies KVKey, normalizeIntake(req), appStore);
 }
@@ -222,7 +359,14 @@ export async function listIntake(): Promise<IntakeRequest[]> {
     return normalized.sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt));
   }
   const items = (await getMany(allKeys, appStore)) as Array<IntakeRequest | undefined>;
-  const normalized = (items.filter(Boolean) as IntakeRequest[]).map(normalizeIntake);
+  let normalized = (items.filter(Boolean) as IntakeRequest[]).map(normalizeIntake);
+  if (import.meta.env.DEV && normalized.filter((r) => r.status === "requests").length === 0) {
+    const demos = fakePendingIntakesForDev(new Date());
+    await Promise.all(demos.map((req) => putIntake(normalizeIntake(req))));
+    const keys2 = (await keys(appStore)).filter((k) => typeof k === "string" && k.startsWith("intake:")) as string[];
+    const items2 = (await getMany(keys2, appStore)) as Array<IntakeRequest | undefined>;
+    normalized = (items2.filter(Boolean) as IntakeRequest[]).map(normalizeIntake);
+  }
   await Promise.all(normalized.map((req) => putIntake(req)));
   return normalized.sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt));
 }
@@ -351,9 +495,11 @@ async function finalizeProposalBookingFromRow(row: IntakeRequest): Promise<Final
     kind: "appointment",
     startISO: start.toISOString(),
     endISO: end.toISOString(),
-    customerId: row.id,
+    customerId: row.customerId ?? row.id,
     customerName: row.customerName,
     phoneNumber: row.phoneNumber,
+    serviceName: row.proposal.serviceName,
+    price: row.proposal.price,
     notes: `${row.proposal.serviceName} · $${row.proposal.price} (deposit $${row.proposal.deposit})`
   };
   await putAppointment(appt);
@@ -362,7 +508,10 @@ async function finalizeProposalBookingFromRow(row: IntakeRequest): Promise<Final
     ...row,
     status: "upcoming",
     proposal: { ...row.proposal, selectedSlotISO: slotStartISO, pendingSlotISO: undefined },
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    bookingDetails: row.bookingDetails
+      ? { ...row.bookingDetails, paymentStatus: "paid" as const }
+      : row.bookingDetails
   };
   await putIntake(next);
 
@@ -389,7 +538,7 @@ export type SetProposalPendingSlotResult =
       error: "not_found" | "no_proposal" | "not_pending" | "already_finalized" | "invalid_slot" | "conflict";
     };
 
-/** Records the client’s preferred slot. Calendar block + Upcoming only after deposit is also recorded. */
+/** Records the client’s chosen slot from the offer link and finalizes: calendar appointment, thread → upcoming, link fulfilled. Marks deposit received when they confirm (demo); use `setProposalDepositPaid` from a payment webhook if deposit must wait on real payment. */
 export async function setProposalPendingSlot(intakeId: string, slotStartISO: string): Promise<SetProposalPendingSlotResult> {
   const row = await getIntakeById(intakeId);
   if (!row) return { ok: false, error: "not_found" };
@@ -400,18 +549,22 @@ export async function setProposalPendingSlot(intakeId: string, slotStartISO: str
   const start = new Date(slotStartISO);
   if (Number.isNaN(start.getTime())) return { ok: false, error: "invalid_slot" };
 
-  const proposalAfterPick = { ...row.proposal, pendingSlotISO: slotStartISO };
-  const merged: IntakeRequest = { ...row, proposal: proposalAfterPick, updatedAt: new Date().toISOString() };
-  await putIntake(merged);
+  const proposalReady = {
+    ...row.proposal,
+    pendingSlotISO: slotStartISO,
+    depositPaid: true
+  };
+  const mergedReady: IntakeRequest = {
+    ...row,
+    proposal: proposalReady,
+    updatedAt: new Date().toISOString()
+  };
 
-  if (!proposalAfterPick.depositPaid) {
-    return { ok: true, intake: merged, finalized: false };
-  }
-
-  const fin = await finalizeProposalBookingFromRow(merged);
+  const fin = await finalizeProposalBookingFromRow(mergedReady);
   if (!fin.ok) {
     if (fin.error === "conflict") return { ok: false, error: "conflict" };
-    return { ok: true, intake: merged, finalized: false };
+    if (fin.error === "invalid_slot") return { ok: false, error: "invalid_slot" };
+    return { ok: false, error: "not_pending" };
   }
   return { ok: true, intake: fin.intake, finalized: true };
 }
@@ -494,6 +647,74 @@ export async function getBookingLinkByToken(token: string): Promise<BookingLink 
   await sweepExpiredBookingLinks();
   const link = (await get(`booklink:${token}` satisfies KVKey, appStore)) as BookingLink | undefined;
   return link ?? null;
+}
+
+/** Ensure the studio’s public `/book/:token` link exists (form mode) and embed the latest form snapshot. */
+export async function ensurePublicFormBookingLink(): Promise<{ token: string; bookingUrl: string }> {
+  const settings = defaultOrMigratePublicBookingSettings(BOOKING_REQUEST_FORM_ID);
+  const form = getSavedForm(settings.linkedFormId);
+  if (!form) throw new Error("Public booking form not found");
+
+  let token = settings.token;
+  const existing = await getBookingLinkByToken(token);
+  if (existing && existing.kind !== "form") {
+    const fresh = await allocBookingToken();
+    const nextSettings = { ...settings, token: fresh };
+    savePublicBookingSettings(nextSettings);
+    token = fresh;
+  }
+
+  const now = new Date().toISOString();
+  const byline = loadStudioByline();
+  const snap = form.blocks as unknown as BookingLink["formSnapshot"];
+  const at = await getBookingLinkByToken(token);
+  if (!at) {
+    const link: BookingLink = {
+      id: crypto.randomUUID(),
+      token,
+      kind: "form",
+      status: "active",
+      providerDisplayName: byline.trim() || "Your studio",
+      serviceName: "Booking request",
+      durationMins: 60,
+      price: 0,
+      deposit: 0,
+      slotStartISOs: [],
+      formId: settings.linkedFormId,
+      formSnapshot: snap,
+      createdAt: now,
+      updatedAt: now
+    };
+    await set(`booklink:${token}` satisfies KVKey, link, appStore);
+  } else if (at.kind === "form") {
+    const next: BookingLink = {
+      ...at,
+      formId: settings.linkedFormId,
+      formSnapshot: snap,
+      providerDisplayName: byline.trim() || at.providerDisplayName,
+      updatedAt: now
+    };
+    await set(`booklink:${token}` satisfies KVKey, next, appStore);
+  }
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return { token, bookingUrl: `${origin}/book/${token}` };
+}
+
+export async function syncPublicFormBookingLinkContent(): Promise<void> {
+  const s = loadPublicBookingSettings();
+  if (!s?.token) return;
+  const form = getSavedForm(s.linkedFormId);
+  if (!form) return;
+  const link = await getBookingLinkByToken(s.token);
+  if (!link || link.kind !== "form") return;
+  const next: BookingLink = {
+    ...link,
+    formId: s.linkedFormId,
+    formSnapshot: form.blocks as unknown as BookingLink["formSnapshot"],
+    updatedAt: new Date().toISOString()
+  };
+  await set(`booklink:${s.token}` satisfies KVKey, next, appStore);
 }
 
 export async function getActiveOfferTokenForIntake(intakeId: string): Promise<string | null> {

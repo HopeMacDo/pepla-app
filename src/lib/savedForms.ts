@@ -1,5 +1,7 @@
 /** Client-side persisted custom forms (Settings → Forms). */
 
+import { BOOKING_REQUEST_FORM_ID, createDefaultBookingRequestForm } from "./bookingRequestFormSeed";
+
 export const QUESTION_KINDS = [
   { value: "short_answer", label: "Short answer" },
   { value: "long_answer", label: "Long answer" },
@@ -21,6 +23,10 @@ export type TitleBlock = { id: string; kind: "title_desc"; title: string; descri
 /** Runtime: `src` is blob: or data: URL for &lt;img&gt;. */
 export type ImageBlock = { id: string; kind: "image"; src: string | null; caption: string; required: boolean };
 
+export type IntakeDayKey = "tue" | "wed" | "thu" | "fri" | "sat";
+
+export type FormIntakeFieldKey = "firstName" | "lastName" | "phone" | "message" | "availability";
+
 export type QuestionBlock = {
   id: string;
   kind: "question";
@@ -37,6 +43,12 @@ export type QuestionBlock = {
    * (in addition to the block-level Required setting, if any).
    */
   gridRequireEachRow?: boolean;
+  /** Map answers into a booking intake (public booking form). */
+  fieldKey?: FormIntakeFieldKey;
+  /** Checkbox / MC grid: when true, Tue–Sat columns follow Settings → Bookings → Business Hours. */
+  gridSyncBusinessHours?: boolean;
+  /** Column index → intake weekday key (Tue–Sat). Used with availability grids. */
+  gridColumnDayKeys?: IntakeDayKey[];
 };
 
 export type FormBlock = TitleBlock | ImageBlock | QuestionBlock;
@@ -69,6 +81,12 @@ export function needsGrid(k: QuestionKind) {
 
 const STORAGE_KEY = "pepla-saved-forms-v1";
 
+function ensureBookingRequestFormSeed() {
+  const all = readAll();
+  if (all.some((f) => f.id === BOOKING_REQUEST_FORM_ID)) return;
+  writeAll([...all, createDefaultBookingRequestForm()]);
+}
+
 function readAll(): SavedForm[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -98,10 +116,12 @@ function writeAll(forms: SavedForm[]) {
 }
 
 export function listSavedForms(): SavedForm[] {
+  ensureBookingRequestFormSeed();
   return readAll().sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
 export function getSavedForm(id: string): SavedForm | undefined {
+  ensureBookingRequestFormSeed();
   return readAll().find((f) => f.id === id);
 }
 
@@ -170,11 +190,27 @@ export function deserializeBlocks(blocks: PersistedFormBlock[]): FormBlock[] {
       (q.questionKind === "multiple_choice_grid" || q.questionKind === "checkbox_grid") && q.gridRequireEachRow === true
         ? true
         : undefined;
+    const rawFk = (q as { fieldKey?: unknown }).fieldKey;
+    const fieldKey =
+      rawFk === "firstName" || rawFk === "lastName" || rawFk === "phone" || rawFk === "message" || rawFk === "availability"
+        ? rawFk
+        : undefined;
+    const gridSyncBusinessHours = q.gridSyncBusinessHours === true ? true : undefined;
+    const rawKeys = (q as { gridColumnDayKeys?: unknown }).gridColumnDayKeys;
+    const gridColumnDayKeys =
+      Array.isArray(rawKeys) && rawKeys.length > 0
+        ? rawKeys.filter((x): x is IntakeDayKey =>
+            x === "tue" || x === "wed" || x === "thu" || x === "fri" || x === "sat"
+          )
+        : undefined;
     return {
       ...q,
       required: q.required === true,
       checkboxMaxSelections,
-      gridRequireEachRow
+      gridRequireEachRow,
+      fieldKey,
+      gridSyncBusinessHours,
+      gridColumnDayKeys
     };
   });
 }

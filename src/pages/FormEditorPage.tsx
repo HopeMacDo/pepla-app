@@ -851,6 +851,8 @@ function QuestionBlockEditor({
       patch.checkboxMaxSelections = undefined;
     } else {
       patch.gridRequireEachRow = undefined;
+      patch.gridSyncBusinessHours = undefined;
+      patch.gridColumnDayKeys = undefined;
     }
     onChange(block.id, patch);
   };
@@ -1017,6 +1019,25 @@ function QuestionBlockEditor({
                 className="h-3.5 w-3.5 shrink-0 rounded-sm border border-slateGrey/35 accent-slateGrey focus:outline-none focus-visible:ring-2 focus-visible:ring-slateGrey/25"
               />
               Require a response for each row
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 font-body text-sm text-slateGrey">
+              <input
+                type="checkbox"
+                checked={block.gridSyncBusinessHours === true}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    onChange(block.id, {
+                      gridSyncBusinessHours: true,
+                      colLabels: ["Tue", "Wed", "Thu", "Fri", "Sat"],
+                      gridColumnDayKeys: ["tue", "wed", "thu", "fri", "sat"]
+                    });
+                  } else {
+                    onChange(block.id, { gridSyncBusinessHours: false });
+                  }
+                }}
+                className="h-3.5 w-3.5 shrink-0 rounded-sm border border-slateGrey/35 accent-slateGrey focus:outline-none focus-visible:ring-2 focus-visible:ring-slateGrey/25"
+              />
+              Connect columns to business hours (Tue–Sat columns follow Settings → Bookings → Business Hours)
             </label>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-3">

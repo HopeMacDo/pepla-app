@@ -131,7 +131,7 @@ export const AppointmentSchema = z.object({
 });
 export type Appointment = z.infer<typeof AppointmentSchema>;
 
-export const BookingLinkKindSchema = z.enum(["spot", "offer"]);
+export const BookingLinkKindSchema = z.enum(["spot", "offer", "form"]);
 export type BookingLinkKind = z.infer<typeof BookingLinkKindSchema>;
 
 export const BookingLinkStatusSchema = z.enum(["active", "fulfilled", "expired", "cancelled"]);
@@ -166,12 +166,17 @@ export const BookingLinkSchema = z.object({
   intakeId: z.string().optional(),
   /** After a Spot is claimed, the new inbox thread id. */
   fulfilledIntakeId: z.string().optional(),
+  /** Public form booking: which saved form (Settings → Forms). */
+  formId: z.string().optional(),
+  /** Serialized form blocks so `/book/:token` works without the respondent’s localStorage. */
+  formSnapshot: z.array(z.unknown()).optional(),
   providerDisplayName: z.string().min(1),
   serviceName: z.string().min(1),
   durationMins: z.number().int().positive(),
   price: z.number().nonnegative(),
   deposit: z.number().nonnegative(),
-  slotStartISOs: z.array(z.string()).min(1).max(5),
+  /** Spot/offer: offered times. Form links may use an empty array. */
+  slotStartISOs: z.array(z.string()).max(5).default([]),
   /** Link expiry (optional). */
   expiresAt: z.string().optional(),
   createdAt: z.string().optional(),

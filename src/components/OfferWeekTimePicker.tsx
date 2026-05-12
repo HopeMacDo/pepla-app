@@ -1,5 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { Appointment } from "../lib/models";
+import type { Appointment, IntakeAvailability } from "../lib/models";
+import { availabilityOverlayRectsForDay } from "../lib/calendarClientAvailability";
+import {
+  bestSegmentConstrainedDragStart,
+  businessHoursSegmentsForDay,
+  complementGridSegments,
+  effectiveStudioBookingSegmentsForDay,
+  segmentListOverlayRects,
+  slotBlockFitsEffectiveBookingSegments
+} from "../lib/calendarBusinessHours";
+import { businessHoursPolicyActive, useBusinessHoursWeek } from "../lib/businessHours";
 
 const WEEK_GRID_FIRST_HOUR = 7;
 const WEEK_GRID_LAST_HOUR = 21;
@@ -89,6 +99,8 @@ export type OfferWeekTimePickerProps = {
   maxSlots?: number;
   appointments: Appointment[];
   onChange: (next: string[]) => void;
+  /** When set, shaded regions match client intake preferences and new slots must fall inside them (Tue–Sat). */
+  clientAvailabilitySelections?: IntakeAvailability | null;
 };
 
 export default function OfferWeekTimePicker({
@@ -96,8 +108,12 @@ export default function OfferWeekTimePicker({
   selectedSlotISOs,
   maxSlots = 5,
   appointments,
-  onChange
+  onChange,
+  clientAvailabilitySelections = null
 }: OfferWeekTimePickerProps) {
+  const businessWeek = useBusinessHoursWeek();
+  const businessPolicyActive = businessHoursPolicyActive(businessWeek);
+
   const [weekAnchor, setWeekAnchor] = useState(() => calendarDate(new Date()));
   const weekStart = useMemo(() => startOfWeek(weekAnchor), [weekAnchor]);
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -107,6 +123,42 @@ export default function OfferWeekTimePicker({
   const dragRef = useRef<SlotDrag | null>(null);
 
   const dowLetters = ["S", "M", "T", "W", "T", "F", "S"];
+
+  const slotVisualForPointer = useCallback(
+    (d: Date, offsetY: number, dm: number) => {
+      const segs = effectiveStudioBookingSegmentsForDay(
+        d,
+        clientAvailabilitySelections ?? null,
+        businessWeek,
+        WEEK_GRID_FIRST_HOUR,
+        WEEK_GRID_LAST_HOUR
+      );
+      if (segs === null) {
+        return weekSlotFromOffsetY(offsetY, dm);
+      }
+      if (segs.length === 0) {
+        return { top: 0, height: 0, startMinFromGrid: -1 };
+      }
+      const start = bestSegmentConstrainedDragStart(
+        segs,
+        offsetY,
+        WEEK_GRID_FIRST_HOUR,
+        WEEK_GRID_LAST_HOUR,
+        WEEK_SLOT_MINUTES,
+        dm,
+        startMinFromOffsetY
+      );
+      if (start === null) {
+        return { top: 0, height: 0, startMinFromGrid: -1 };
+      }
+      return {
+        top: (start / 60) * WEEK_PX_PER_HOUR,
+        height: (dm / 60) * WEEK_PX_PER_HOUR,
+        startMinFromGrid: start
+      };
+    },
+    [businessWeek, clientAvailabilitySelections]
+  );
 
   const extraRanges = useMemo(() => {
     return selectedSlotISOs.map((iso) => {
@@ -136,9 +188,28 @@ export default function OfferWeekTimePicker({
         window.alert(err);
         return;
       }
+      if (
+        !slotBlockFitsEffectiveBookingSegments(
+          iso,
+          durationMins,
+          effectiveStudioBookingSegmentsForDay(
+            new Date(iso),
+            clientAvailabilitySelections ?? null,
+            businessWeek,
+            WEEK_GRID_FIRST_HOUR,
+            WEEK_GRID_LAST_HOUR
+          ),
+          WEEK_GRID_FIRST_HOUR
+        )
+      ) {
+        window.alert(
+          "That time is outside this client’s preferred availability (shaded areas)."
+        );
+        return;
+      }
       onChange([...selectedSlotISOs, iso].sort((a, b) => a.localeCompare(b)));
     },
-    [appointments, durationMins, maxSlots, onChange, selectedSlotISOs]
+    [appointments, businessWeek, clientAvailabilitySelections, durationMins, maxSlots, onChange, selectedSlotISOs]
   );
 
   return (
@@ -165,6 +236,24 @@ export default function OfferWeekTimePicker({
       <p className="font-body text-xs text-slateGrey/65">
         Drag on a day to place a {durationMins}-minute block (up to {maxSlots} options). Release to add the snapped start
         time.
+        {clientAvailabilitySelections || businessPolicyActive ? (
+          <span className="mt-1 block text-slateGrey/55">
+            {businessPolicyActive ? (
+              <>
+                Your usual business hours appear as a clear column (shaded is outside that window) as a guide only —
+                you can still place offer slots there.{" "}
+                {clientAvailabilitySelections
+                  ? "Blue bands are this client’s preferred mornings (9–12) and afternoons (12–5) on Tue–Sat; slots must fall inside those where shown."
+                  : ""}
+              </>
+            ) : (
+              <>
+                Shaded bands match this client’s preferred mornings (9–12) and afternoons (12–5) on Tue–Sat; new slots
+                must fall inside them on those days.
+              </>
+            )}
+          </span>
+        ) : null}
       </p>
 
       <div className="max-h-[min(22rem,55vh)] overflow-auto rounded-xl border border-slateGrey/15 bg-chalk/80">
@@ -217,18 +306,53 @@ export default function OfferWeekTimePicker({
                     )}
                     style={{ ...weekColumnGuideStyle, minHeight: weekGridHeight }}
                   >
+                    {businessPolicyActive && (
+                      <div className="pointer-events-none absolute inset-0 z-0 mx-0.5" aria-hidden>
+                        {segmentListOverlayRects(
+                          complementGridSegments(
+                            businessHoursSegmentsForDay(d, businessWeek, WEEK_GRID_FIRST_HOUR, WEEK_GRID_LAST_HOUR),
+                            WEEK_GRID_FIRST_HOUR,
+                            WEEK_GRID_LAST_HOUR
+                          ),
+                          WEEK_PX_PER_HOUR
+                        ).map((rect, idx) => (
+                          <div
+                            key={`biz-${idx}`}
+                            className="absolute inset-x-0 rounded-sm bg-slateGrey/[0.09]"
+                            style={{ top: rect.top, height: Math.max(rect.height, 6) }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {clientAvailabilitySelections && (
+                      <div className="pointer-events-none absolute inset-0 z-[1] mx-0.5" aria-hidden>
+                        {availabilityOverlayRectsForDay(
+                          d,
+                          clientAvailabilitySelections,
+                          WEEK_GRID_FIRST_HOUR,
+                          WEEK_GRID_LAST_HOUR,
+                          WEEK_PX_PER_HOUR
+                        ).map((rect, idx) => (
+                          <div
+                            key={idx}
+                            className="absolute inset-x-0 rounded-sm bg-sky/35 ring-1 ring-sky/45"
+                            style={{ top: rect.top, height: Math.max(rect.height, 6) }}
+                          />
+                        ))}
+                      </div>
+                    )}
                     <button
                       type="button"
                       aria-label={`Drag to add ${dm} minutes on ${d.toDateString()}`}
                       className="absolute inset-0 z-[1] w-full cursor-crosshair border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slateGrey/25"
                       onPointerMove={(e) => {
                         if (dragRef.current?.dayKey === k && dragRef.current.pointerId === e.pointerId) {
-                          const { top, height } = weekSlotFromOffsetY(e.nativeEvent.offsetY, dm);
+                          const { top, height } = slotVisualForPointer(d, e.nativeEvent.offsetY, dm);
                           setHover({ dayKey: k, top, height });
                           return;
                         }
                         if (dragRef.current) return;
-                        const { top, height } = weekSlotFromOffsetY(e.nativeEvent.offsetY, dm);
+                        const { top, height } = slotVisualForPointer(d, e.nativeEvent.offsetY, dm);
                         setHover({ dayKey: k, top, height });
                       }}
                       onPointerLeave={() => {
@@ -237,7 +361,7 @@ export default function OfferWeekTimePicker({
                       onPointerDown={(e) => {
                         (e.currentTarget as HTMLButtonElement).setPointerCapture(e.pointerId);
                         dragRef.current = { dayKey: k, pointerId: e.pointerId };
-                        const { top, height } = weekSlotFromOffsetY(e.nativeEvent.offsetY, dm);
+                        const { top, height } = slotVisualForPointer(d, e.nativeEvent.offsetY, dm);
                         setHover({ dayKey: k, top, height });
                       }}
                       onPointerUp={(e) => {
@@ -245,7 +369,8 @@ export default function OfferWeekTimePicker({
                         if (!cur || cur.pointerId !== e.pointerId || cur.dayKey !== k) return;
                         dragRef.current = null;
                         setHover(null);
-                        const { startMinFromGrid } = weekSlotFromOffsetY(e.nativeEvent.offsetY, dm);
+                        const { startMinFromGrid } = slotVisualForPointer(d, e.nativeEvent.offsetY, dm);
+                        if (startMinFromGrid < 0) return;
                         const iso = slotStartISOForDay(d, startMinFromGrid);
                         tryAdd(iso);
                       }}

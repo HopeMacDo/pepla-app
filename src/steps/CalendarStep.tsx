@@ -2,8 +2,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Input, Label, Textarea } from "../ui/primitives";
 import { ScrollingMonthCalendarDialog } from "../ui/ScrollingMonthCalendarDialog";
-import type { Appointment } from "../lib/models";
-import { deleteAppointment, listAppointments, putAppointment, sweepExpiredBookingLinks } from "../lib/storage";
+import type { Appointment, IntakeAvailability } from "../lib/models";
+import { availabilityOverlayRectsForDay } from "../lib/calendarClientAvailability";
+import { useBusinessHoursWeek, businessHoursPolicyActive } from "../lib/businessHours";
+import {
+  bestSegmentConstrainedDragStart,
+  businessHoursSegmentsForDay,
+  complementGridSegments,
+  constrainedSegmentDragDurationMins,
+  effectiveStudioBookingSegmentsForDay,
+  segmentListOverlayRects,
+  slotBlockFitsEffectiveBookingSegments
+} from "../lib/calendarBusinessHours";
+import { deleteAppointment, getIntakeById, listAppointments, putAppointment, sweepExpiredBookingLinks } from "../lib/storage";
 
 type CalendarViewMode = "month" | "week" | "day";
 
@@ -265,6 +276,12 @@ export default function CalendarStep() {
   const [selectedDate, setSelectedDate] = useState(() => isoDate(new Date()));
   const [customerName, setCustomerName] = useState(() => sp.get("name") ?? "");
   const [phoneNumber, setPhoneNumber] = useState(() => sp.get("phone") ?? "");
+  const intakeIdFromQuery = useMemo(() => sp.get("intake")?.trim() || null, [sp]);
+  const [clientAvailabilityOverlay, setClientAvailabilityOverlay] = useState<IntakeAvailability | null>(null);
+  const [clientAvailabilityBannerName, setClientAvailabilityBannerName] = useState<string | null>(null);
+  const businessWeek = useBusinessHoursWeek();
+  const businessPolicyActive = businessHoursPolicyActive(businessWeek);
+  const intakeWeekBootRef = useRef(false);
   const [notes, setNotes] = useState("");
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [busy, setBusy] = useState(false);
@@ -283,6 +300,42 @@ export default function CalendarStep() {
     const id = window.setInterval(() => setNowTick((t) => t + 1), 60_000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    intakeWeekBootRef.current = false;
+  }, [intakeIdFromQuery]);
+
+  useEffect(() => {
+    if (!intakeIdFromQuery) {
+      setClientAvailabilityOverlay(null);
+      setClientAvailabilityBannerName(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const row = await getIntakeById(intakeIdFromQuery);
+      if (cancelled) return;
+      if (row?.status === "requests" && row.availabilitySelections) {
+        setClientAvailabilityOverlay(row.availabilitySelections);
+        setClientAvailabilityBannerName(row.customerName);
+      } else {
+        setClientAvailabilityOverlay(null);
+        setClientAvailabilityBannerName(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [intakeIdFromQuery]);
+
+  useEffect(() => {
+    if (!clientAvailabilityOverlay || intakeWeekBootRef.current) return;
+    intakeWeekBootRef.current = true;
+    const today = calendarDate(new Date());
+    setCalendarView("week");
+    setWeekCursor(today);
+    setMonthCursor(startOfMonth(today));
+  }, [clientAvailabilityOverlay]);
 
   useEffect(() => {
     (async () => {
@@ -529,6 +582,28 @@ export default function CalendarStep() {
       });
       if (conflict) throw new Error("That time overlaps an existing booking.");
 
+      const segs = effectiveStudioBookingSegmentsForDay(
+        day,
+        clientAvailabilityOverlay,
+        businessWeek,
+        WEEK_GRID_FIRST_HOUR,
+        WEEK_GRID_LAST_HOUR
+      );
+      if (
+        !slotBlockFitsEffectiveBookingSegments(
+          start.toISOString(),
+          durationMins,
+          segs,
+          WEEK_GRID_FIRST_HOUR
+        )
+      ) {
+        throw new Error(
+          clientAvailabilityOverlay
+            ? "That time is outside this client's preferred availability for this day."
+            : "That time could not be placed."
+        );
+      }
+
       const appt: Appointment = {
         id: crypto.randomUUID(),
         kind: "appointment",
@@ -634,6 +709,83 @@ export default function CalendarStep() {
       setMonthCursor(startOfMonth(parseISODate(selectedDate)));
     }
     setCalendarView("month");
+  }
+
+  function dismissClientAvailabilityOverlay() {
+    const next = new URLSearchParams(sp);
+    next.delete("intake");
+    navigate(`/calendar${next.toString() ? `?${next}` : ""}`);
+  }
+
+  function effectiveSegments(d: Date) {
+    return effectiveStudioBookingSegmentsForDay(
+      d,
+      clientAvailabilityOverlay,
+      businessWeek,
+      WEEK_GRID_FIRST_HOUR,
+      WEEK_GRID_LAST_HOUR
+    );
+  }
+
+  function weekHoverPreviewY(d: Date, offsetY: number) {
+    const segs = effectiveSegments(d);
+    if (segs === null) {
+      return weekHoverSlotFromOffsetY(offsetY, HOVER_PREVIEW_DURATION_MINS);
+    }
+    if (segs.length === 0) {
+      return { top: 0, height: 0, startMinFromGrid: -1 };
+    }
+    const start = bestSegmentConstrainedDragStart(
+      segs,
+      offsetY,
+      WEEK_GRID_FIRST_HOUR,
+      WEEK_GRID_LAST_HOUR,
+      WEEK_SLOT_MINUTES,
+      HOVER_PREVIEW_DURATION_MINS,
+      startMinFromOffsetY
+    );
+    if (start === null) {
+      return { top: 0, height: 0, startMinFromGrid: -1 };
+    }
+    return {
+      top: (start / 60) * WEEK_PX_PER_HOUR,
+      height: (HOVER_PREVIEW_DURATION_MINS / 60) * WEEK_PX_PER_HOUR,
+      startMinFromGrid: start
+    };
+  }
+
+  function slotDragStartFromPointer(d: Date, offsetY: number) {
+    const segs = effectiveSegments(d);
+    if (segs === null) {
+      return weekHoverSlotFromOffsetY(offsetY, HOVER_PREVIEW_DURATION_MINS);
+    }
+    if (segs.length === 0) {
+      return { top: 0, height: 0, startMinFromGrid: -1 };
+    }
+    const start = bestSegmentConstrainedDragStart(
+      segs,
+      offsetY,
+      WEEK_GRID_FIRST_HOUR,
+      WEEK_GRID_LAST_HOUR,
+      WEEK_SLOT_MINUTES,
+      HOVER_PREVIEW_DURATION_MINS,
+      startMinFromOffsetY
+    );
+    if (start === null) {
+      return { top: 0, height: 0, startMinFromGrid: -1 };
+    }
+    return {
+      startMinFromGrid: start,
+      top: (start / 60) * WEEK_PX_PER_HOUR,
+      height: (HOVER_PREVIEW_DURATION_MINS / 60) * WEEK_PX_PER_HOUR
+    };
+  }
+
+  function slotDragDurationForDay(d: Date, startMinFromGrid: number, pointerSnap: number) {
+    if (startMinFromGrid < 0) return HOVER_PREVIEW_DURATION_MINS;
+    const segs = effectiveSegments(d);
+    if (segs === null) return dragSelectionDurationMins(startMinFromGrid, pointerSnap);
+    return constrainedSegmentDragDurationMins(segs, startMinFromGrid, pointerSnap, dragSelectionDurationMins);
   }
 
   return (
@@ -837,7 +989,7 @@ export default function CalendarStep() {
                     navigate(`/calendar/spot?${qs.toString()}`);
                   }}
                 >
-                  Create Spot
+                  Create booking offer
                 </button>
                 <button
                   type="button"
@@ -859,6 +1011,40 @@ export default function CalendarStep() {
           </div>
         </div>
       </div>
+
+      {businessPolicyActive && !clientAvailabilityOverlay && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-slateGrey/20 bg-white/50 px-3 py-2.5 sm:mb-4">
+          <p className="min-w-0 font-body text-sm text-slateGrey">
+            <span className="font-display text-[10px] uppercase tracking-pepla text-slateGrey/65">Business hours </span>
+            From Settings → Bookings → Business Hours: clear column is your usual availability; shaded bands are outside
+            that window. This is a guide on your calendar — you can still book, block time, or create booking offers
+            there. Public client booking still treats closed times as unavailable.
+          </p>
+        </div>
+      )}
+
+      {clientAvailabilityOverlay && clientAvailabilityBannerName && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky/40 bg-sky/25 px-3 py-2.5 sm:mb-4">
+          <p className="min-w-0 font-body text-sm text-slateGrey">
+            <span className="font-display text-[10px] uppercase tracking-pepla text-slateGrey/65">Client availability </span>
+            Preferred times for <span className="font-medium">{clientAvailabilityBannerName}</span>
+            <span className="text-slateGrey/70">
+              {" "}
+              — mornings 9–12, afternoons 12–5 (Tue–Sat from request). Drag inside the shaded blocks
+              {businessPolicyActive
+                ? "; your usual business hours show as a clear column for reference and do not limit where you drag here."
+                : "."}
+            </span>
+          </p>
+          <button
+            type="button"
+            className="shrink-0 rounded-lg border border-slateGrey/20 bg-chalk/80 px-3 py-1.5 font-display text-[10px] uppercase tracking-pepla text-slateGrey/80 transition hover:bg-chalk focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slateGrey/25"
+            onClick={dismissClientAvailabilityOverlay}
+          >
+            Clear overlay
+          </button>
+        </div>
+      )}
 
       {slotMenu?.open && (
         <div
@@ -899,7 +1085,7 @@ export default function CalendarStep() {
               navigate(`/calendar/spot?${qs.toString()}`);
             }}
           >
-            Create Spot
+            Create booking offer
           </button>
           <button
             type="button"
@@ -1114,6 +1300,46 @@ export default function CalendarStep() {
                             className={["relative min-w-0", isPastCol ? "bg-slateGrey/[0.03]" : ""].join(" ")}
                             style={weekColumnGuideStyle}
                           >
+                            {businessPolicyActive && (
+                              <div className="pointer-events-none absolute inset-0 z-0 mx-1 sm:mx-1.5" aria-hidden>
+                                {segmentListOverlayRects(
+                                  complementGridSegments(
+                                    businessHoursSegmentsForDay(
+                                      d,
+                                      businessWeek,
+                                      WEEK_GRID_FIRST_HOUR,
+                                      WEEK_GRID_LAST_HOUR
+                                    ),
+                                    WEEK_GRID_FIRST_HOUR,
+                                    WEEK_GRID_LAST_HOUR
+                                  ),
+                                  WEEK_PX_PER_HOUR
+                                ).map((rect, idx) => (
+                                  <div
+                                    key={`biz-${idx}`}
+                                    className="absolute inset-x-0 rounded-sm bg-slateGrey/[0.09]"
+                                    style={{ top: rect.top, height: Math.max(rect.height, 6) }}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                            {clientAvailabilityOverlay && (
+                              <div className="pointer-events-none absolute inset-0 z-[1] mx-1 sm:mx-1.5" aria-hidden>
+                                {availabilityOverlayRectsForDay(
+                                  d,
+                                  clientAvailabilityOverlay,
+                                  WEEK_GRID_FIRST_HOUR,
+                                  WEEK_GRID_LAST_HOUR,
+                                  WEEK_PX_PER_HOUR
+                                ).map((rect, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="absolute inset-x-0 rounded-sm bg-sky/35 ring-1 ring-sky/45"
+                                    style={{ top: rect.top, height: Math.max(rect.height, 6) }}
+                                  />
+                                ))}
+                              </div>
+                            )}
                             {nowLineOffsetPx != null && isTodayCol && (
                               <div
                                 className="pointer-events-none absolute left-0 right-0 z-[25] flex items-center"
@@ -1130,16 +1356,13 @@ export default function CalendarStep() {
                               className="absolute inset-0 z-[1] w-full cursor-crosshair border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slateGrey/25"
                               onMouseMove={(e) => {
                                 if (slotDragRef.current?.k === k) return;
-                                const { top, height } = weekHoverSlotFromOffsetY(e.nativeEvent.offsetY, HOVER_PREVIEW_DURATION_MINS);
+                                const { top, height } = weekHoverPreviewY(d, e.nativeEvent.offsetY);
                                 setWeekSlotHover({ k, top, height });
                               }}
                               onMouseLeave={() => setWeekSlotHover((h) => (h?.k === k ? null : h))}
                               onPointerDown={(e) => {
                                 (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                                const { startMinFromGrid, top, height } = weekHoverSlotFromOffsetY(
-                                  e.nativeEvent.offsetY,
-                                  HOVER_PREVIEW_DURATION_MINS
-                                );
+                                const { startMinFromGrid, top, height } = slotDragStartFromPointer(d, e.nativeEvent.offsetY);
                                 slotDragRef.current = { k, d, startMinFromGrid, pointerId: e.pointerId };
                                 setWeekSlotHover({ k, top, height });
                               }}
@@ -1147,7 +1370,7 @@ export default function CalendarStep() {
                                 const cur = slotDragRef.current;
                                 if (!cur || cur.pointerId !== e.pointerId || cur.k !== k) return;
                                 const pointerSnap = startMinFromOffsetY(e.nativeEvent.offsetY);
-                                const dur = dragSelectionDurationMins(cur.startMinFromGrid, pointerSnap);
+                                const dur = slotDragDurationForDay(d, cur.startMinFromGrid, pointerSnap);
                                 setWeekSlotHover({
                                   k,
                                   top: (cur.startMinFromGrid / 60) * WEEK_PX_PER_HOUR,
@@ -1157,8 +1380,13 @@ export default function CalendarStep() {
                               onPointerUp={(e) => {
                                 const cur = slotDragRef.current;
                                 if (!cur || cur.pointerId !== e.pointerId || cur.k !== k) return;
+                                if (cur.startMinFromGrid < 0) {
+                                  slotDragRef.current = null;
+                                  setWeekSlotHover(null);
+                                  return;
+                                }
                                 const pointerSnap = startMinFromOffsetY(e.nativeEvent.offsetY);
-                                const dur = dragSelectionDurationMins(cur.startMinFromGrid, pointerSnap);
+                                const dur = slotDragDurationForDay(d, cur.startMinFromGrid, pointerSnap);
                                 slotDragRef.current = null;
                                 setWeekSlotHover(null);
                                 openSlotActionMenu({
@@ -1313,6 +1541,46 @@ export default function CalendarStep() {
                           className={["relative min-w-0", dayViewGrid.isPastCol ? "bg-slateGrey/[0.03]" : ""].join(" ")}
                           style={weekColumnGuideStyle}
                         >
+                          {businessPolicyActive && (
+                            <div className="pointer-events-none absolute inset-0 z-0 mx-1 sm:mx-1.5" aria-hidden>
+                              {segmentListOverlayRects(
+                                complementGridSegments(
+                                  businessHoursSegmentsForDay(
+                                    dayViewGrid.d,
+                                    businessWeek,
+                                    WEEK_GRID_FIRST_HOUR,
+                                    WEEK_GRID_LAST_HOUR
+                                  ),
+                                  WEEK_GRID_FIRST_HOUR,
+                                  WEEK_GRID_LAST_HOUR
+                                ),
+                                WEEK_PX_PER_HOUR
+                              ).map((rect, idx) => (
+                                <div
+                                  key={`biz-${idx}`}
+                                  className="absolute inset-x-0 rounded-sm bg-slateGrey/[0.09]"
+                                  style={{ top: rect.top, height: Math.max(rect.height, 6) }}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {clientAvailabilityOverlay && (
+                            <div className="pointer-events-none absolute inset-0 z-[1] mx-1 sm:mx-1.5" aria-hidden>
+                              {availabilityOverlayRectsForDay(
+                                dayViewGrid.d,
+                                clientAvailabilityOverlay,
+                                WEEK_GRID_FIRST_HOUR,
+                                WEEK_GRID_LAST_HOUR,
+                                WEEK_PX_PER_HOUR
+                              ).map((rect, idx) => (
+                                <div
+                                  key={idx}
+                                  className="absolute inset-x-0 rounded-sm bg-sky/35 ring-1 ring-sky/45"
+                                  style={{ top: rect.top, height: Math.max(rect.height, 6) }}
+                                />
+                              ))}
+                            </div>
+                          )}
                           {nowLineOffsetPx != null && dayViewGrid.isTodayCol && (
                             <div
                               className="pointer-events-none absolute left-0 right-0 z-[25] flex items-center"
@@ -1329,15 +1597,15 @@ export default function CalendarStep() {
                             className="absolute inset-0 z-[1] w-full cursor-crosshair border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slateGrey/25"
                             onMouseMove={(e) => {
                               if (slotDragRef.current?.k === dayViewGrid.k) return;
-                              const { top, height } = weekHoverSlotFromOffsetY(e.nativeEvent.offsetY, HOVER_PREVIEW_DURATION_MINS);
+                              const { top, height } = weekHoverPreviewY(dayViewGrid.d, e.nativeEvent.offsetY);
                               setWeekSlotHover({ k: dayViewGrid.k, top, height });
                             }}
                             onMouseLeave={() => setWeekSlotHover((h) => (h?.k === dayViewGrid.k ? null : h))}
                             onPointerDown={(e) => {
                               (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                              const { startMinFromGrid, top, height } = weekHoverSlotFromOffsetY(
-                                e.nativeEvent.offsetY,
-                                HOVER_PREVIEW_DURATION_MINS
+                              const { startMinFromGrid, top, height } = slotDragStartFromPointer(
+                                dayViewGrid.d,
+                                e.nativeEvent.offsetY
                               );
                               slotDragRef.current = {
                                 k: dayViewGrid.k,
@@ -1351,7 +1619,7 @@ export default function CalendarStep() {
                               const cur = slotDragRef.current;
                               if (!cur || cur.pointerId !== e.pointerId || cur.k !== dayViewGrid.k) return;
                               const pointerSnap = startMinFromOffsetY(e.nativeEvent.offsetY);
-                              const dur = dragSelectionDurationMins(cur.startMinFromGrid, pointerSnap);
+                              const dur = slotDragDurationForDay(dayViewGrid.d, cur.startMinFromGrid, pointerSnap);
                               setWeekSlotHover({
                                 k: dayViewGrid.k,
                                 top: (cur.startMinFromGrid / 60) * WEEK_PX_PER_HOUR,
@@ -1361,8 +1629,13 @@ export default function CalendarStep() {
                             onPointerUp={(e) => {
                               const cur = slotDragRef.current;
                               if (!cur || cur.pointerId !== e.pointerId || cur.k !== dayViewGrid.k) return;
+                              if (cur.startMinFromGrid < 0) {
+                                slotDragRef.current = null;
+                                setWeekSlotHover(null);
+                                return;
+                              }
                               const pointerSnap = startMinFromOffsetY(e.nativeEvent.offsetY);
-                              const dur = dragSelectionDurationMins(cur.startMinFromGrid, pointerSnap);
+                              const dur = slotDragDurationForDay(dayViewGrid.d, cur.startMinFromGrid, pointerSnap);
                               slotDragRef.current = null;
                               setWeekSlotHover(null);
                               openSlotActionMenu({

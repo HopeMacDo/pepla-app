@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearch
 import { useEffect, useMemo } from "react";
 
 import MainLayout from "./layout/MainLayout";
+import SettingsBookingsPage, { SettingsBookingsSubPage } from "./pages/SettingsBookingsPage";
 import SettingsPage, { SettingsSectionPage } from "./pages/SettingsPage";
 import FormDetailPage from "./pages/FormDetailPage";
 import FormEditorPage from "./pages/FormEditorPage";
@@ -136,6 +137,8 @@ export default function App() {
         </Route>
         <Route path="/settings/services/:serviceId" element={<ServiceEditorPage />} />
         <Route path="/settings/services" element={<ServicesListPage />} />
+        <Route path="/settings/bookings/:slug" element={<SettingsBookingsSubPage />} />
+        <Route path="/settings/bookings" element={<SettingsBookingsPage />} />
         <Route path="/settings/:section" element={<SettingsSectionPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

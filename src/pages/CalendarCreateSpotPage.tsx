@@ -210,7 +210,7 @@ export default function CalendarCreateSpotPage() {
           </svg>
         </button>
         <div className="min-w-0">
-          <h1 className="font-body text-xl font-normal leading-tight sm:text-2xl">Create Spot</h1>
+          <h1 className="font-body text-xl font-normal leading-tight sm:text-2xl">Create Booking Offer</h1>
           <p className="mt-1 font-body text-sm text-slateGrey/70">Post a public opening with a shareable link.</p>
         </div>
       </div>

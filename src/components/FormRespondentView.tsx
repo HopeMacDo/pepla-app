@@ -7,6 +7,7 @@ import {
   type Meridiem
 } from "../lib/businessTime";
 import type { FormBlock, QuestionBlock } from "../lib/savedForms";
+import { effectiveAvailabilityGridLayout } from "../lib/formGridAvailabilityLayout";
 import { ScrollingMonthCalendarDialog } from "../ui/ScrollingMonthCalendarDialog";
 import { Card, CardBody, Textarea } from "../ui/primitives";
 
@@ -480,6 +481,8 @@ function QuestionRespondent({
     }
     case "multiple_choice_grid": {
       const g = parseGridMc(value);
+      const layout = effectiveAvailabilityGridLayout(block);
+      const { colLabels, rowLabels } = layout;
       const setCol = (row: number, col: number) => {
         onChange({ ...g, [String(row)]: col });
       };
@@ -493,7 +496,7 @@ function QuestionRespondent({
                 <thead>
                   <tr>
                     <th className="border-b border-slateGrey/15 pb-2 pr-2 font-display text-[10px] uppercase tracking-pepla text-slateGrey/50" />
-                    {block.colLabels.map((c, ci) => (
+                    {colLabels.map((c, ci) => (
                       <th
                         key={ci}
                         className="border-b border-slateGrey/15 px-1 pb-2 text-center font-body text-xs font-normal text-slateGrey"
@@ -504,12 +507,12 @@ function QuestionRespondent({
                   </tr>
                 </thead>
                 <tbody>
-                  {block.rowLabels.map((row, ri) => (
+                  {rowLabels.map((row, ri) => (
                     <tr key={ri}>
                       <td className="border-b border-slateGrey/10 py-2 pr-2 align-middle font-body text-sm text-slateGrey">
                         {row.trim() || `Row ${ri + 1}`}
                       </td>
-                      {block.colLabels.map((_, ci) => (
+                      {colLabels.map((_, ci) => (
                         <td key={ci} className="border-b border-slateGrey/10 px-1 py-2 text-center align-middle">
                           <input
                             type="radio"
@@ -517,7 +520,7 @@ function QuestionRespondent({
                             checked={g[String(ri)] === ci}
                             onChange={() => setCol(ri, ci)}
                             className="h-4 w-4 border-slateGrey/35 accent-slateGrey"
-                            aria-label={`${row.trim() || `Row ${ri + 1}`} — ${block.colLabels[ci].trim() || `Column ${ci + 1}`}`}
+                            aria-label={`${row.trim() || `Row ${ri + 1}`} — ${colLabels[ci]?.trim() || `Column ${ci + 1}`}`}
                           />
                         </td>
                       ))}
@@ -532,6 +535,8 @@ function QuestionRespondent({
     }
     case "checkbox_grid": {
       const g = parseGridCb(value);
+      const layout = effectiveAvailabilityGridLayout(block);
+      const { colLabels, rowLabels } = layout;
       const toggle = (row: number, col: number) => {
         const key = String(row);
         const cur = new Set(g[key] ?? []);
@@ -549,7 +554,7 @@ function QuestionRespondent({
                 <thead>
                   <tr>
                     <th className="border-b border-slateGrey/15 pb-2 pr-2 font-display text-[10px] uppercase tracking-pepla text-slateGrey/50" />
-                    {block.colLabels.map((c, ci) => (
+                    {colLabels.map((c, ci) => (
                       <th
                         key={ci}
                         className="border-b border-slateGrey/15 px-1 pb-2 text-center font-body text-xs font-normal text-slateGrey"
@@ -560,19 +565,19 @@ function QuestionRespondent({
                   </tr>
                 </thead>
                 <tbody>
-                  {block.rowLabels.map((row, ri) => (
+                  {rowLabels.map((row, ri) => (
                     <tr key={ri}>
                       <td className="border-b border-slateGrey/10 py-2 pr-2 align-middle font-body text-sm text-slateGrey">
                         {row.trim() || `Row ${ri + 1}`}
                       </td>
-                      {block.colLabels.map((_, ci) => (
+                      {colLabels.map((_, ci) => (
                         <td key={ci} className="border-b border-slateGrey/10 px-1 py-2 text-center align-middle">
                           <input
                             type="checkbox"
                             checked={(g[String(ri)] ?? []).includes(ci)}
                             onChange={() => toggle(ri, ci)}
                             className="h-4 w-4 rounded border-slateGrey/35 accent-slateGrey"
-                            aria-label={`${row.trim() || `Row ${ri + 1}`} — ${block.colLabels[ci].trim() || `Column ${ci + 1}`}`}
+                            aria-label={`${row.trim() || `Row ${ri + 1}`} — ${colLabels[ci]?.trim() || `Column ${ci + 1}`}`}
                           />
                         </td>
                       ))}
@@ -663,10 +668,11 @@ export function validateRespondentAnswers(blocks: FormBlock[], answers: Record<s
         break;
       case "multiple_choice_grid": {
         const g = parseGridMc(v);
+        const { colLabels, rowLabels } = effectiveAvailabilityGridLayout(b);
         if (b.gridRequireEachRow) {
-          for (let ri = 0; ri < b.rowLabels.length; ri++) {
+          for (let ri = 0; ri < rowLabels.length; ri++) {
             const c = g[String(ri)];
-            if (typeof c !== "number" || c < 0 || c >= b.colLabels.length) {
+            if (typeof c !== "number" || c < 0 || c >= colLabels.length) {
               errors.push(`${label}: answer each row.`);
               break;
             }
@@ -678,16 +684,21 @@ export function validateRespondentAnswers(blocks: FormBlock[], answers: Record<s
       }
       case "checkbox_grid": {
         const g = parseGridCb(v);
+        const { colLabels, rowLabels } = effectiveAvailabilityGridLayout(b);
         if (b.gridRequireEachRow) {
-          for (let ri = 0; ri < b.rowLabels.length; ri++) {
+          for (let ri = 0; ri < rowLabels.length; ri++) {
             const cols = g[String(ri)];
             if (!cols || cols.length === 0) {
               errors.push(`${label}: answer each row.`);
               break;
             }
+            if (cols.some((ci) => typeof ci !== "number" || ci < 0 || ci >= colLabels.length)) {
+              errors.push(`${label}: answer each row.`);
+              break;
+            }
           }
         } else {
-          const any = Object.values(g).some((arr) => arr.length > 0);
+          const any = Object.values(g).some((arr) => Array.isArray(arr) && arr.length > 0);
           if (!any) errors.push(`${label}: select at least one option.`);
         }
         break;

@@ -1,7 +1,9 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import IntakeAvailabilityReadGrid from "../components/IntakeAvailabilityReadGrid";
+import IntakeOfferForm from "../components/IntakeOfferForm";
 import { Button, Card, CardBody, CardHeader, Label, Textarea } from "../ui/primitives";
-import type { IntakeRequest, IntakeStatus } from "../lib/models";
+import type { IntakeRequest, IntakeStatus, InboxSlot } from "../lib/models";
 import { appendInboxMessage, getActiveOfferTokenForIntake, getIntakeById, updateIntakeStatus } from "../lib/storage";
 
 const tabLabel: Record<IntakeStatus, string> = {
@@ -31,12 +33,6 @@ function formatAvailability(req: IntakeRequest) {
   return req.availability;
 }
 
-function formatThreadTime(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-}
-
 function formatSlotLine(iso: string, durationMins: number) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return `${iso} · ${durationMins} min`;
@@ -44,17 +40,43 @@ function formatSlotLine(iso: string, durationMins: number) {
   return `${when} · ${durationMins} min`;
 }
 
-function contentTypeLabel(t: string) {
-  switch (t) {
-    case "slot_offer":
-      return "Slot offer";
-    case "booking_confirmation":
-      return "Booking";
-    case "payment_status":
-      return "Payment";
-    default:
-      return "Message";
+function OfferedSlotCard({ slot }: { slot: InboxSlot }) {
+  const d = new Date(slot.startISO);
+  if (Number.isNaN(d.getTime())) {
+    return (
+      <div className="rounded-xl border border-slateGrey/20 bg-chalk px-3 py-3 text-center font-body text-xs text-slateGrey/70">
+        Invalid time
+      </div>
+    );
   }
+  const selected = slot.status === "selected";
+  const expired = slot.status === "expired";
+  const day = d.toLocaleDateString([], { weekday: "short" }).toUpperCase();
+  const dateLabel = `${d.getMonth() + 1}.${d.getDate()}`;
+  const timeLabel = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase();
+
+  return (
+    <div
+      className={[
+        "flex min-w-[5.75rem] max-w-[6.5rem] flex-col items-center justify-center gap-0.5 rounded-xl px-3 py-3 text-center shadow-sm transition",
+        selected ? "bg-void text-chalk ring-1 ring-void" : "border border-slateGrey/25 bg-chalk text-slateGrey",
+        expired ? "opacity-55" : ""
+      ].join(" ")}
+    >
+      <span className={`font-display text-[9px] uppercase tracking-[0.18em] ${selected ? "text-chalk/90" : "text-slateGrey/55"}`}>
+        {day}
+      </span>
+      <span className={`font-body text-lg font-semibold tabular-nums leading-tight ${selected ? "text-chalk" : "text-slateGrey"}`}>
+        {dateLabel}
+      </span>
+      <span className={`font-body text-[13px] tabular-nums leading-tight ${selected ? "text-chalk/90" : "text-slateGrey/85"}`}>
+        {timeLabel}
+      </span>
+      {expired && (
+        <span className="mt-0.5 font-display text-[8px] uppercase tracking-pepla text-slateGrey/50">Expired</span>
+      )}
+    </div>
+  );
 }
 
 const VALID_BACK_TABS: IntakeStatus[] = ["requests", "accepted", "upcoming", "completed", "denied"];
@@ -65,9 +87,10 @@ export default function IntakeDetailStep() {
   const { id } = useParams();
   const [row, setRow] = useState<IntakeRequest | null>(null);
   const [busy, setBusy] = useState(false);
-  const [replyDraft, setReplyDraft] = useState("");
-  const [slotOfferOpen, setSlotOfferOpen] = useState(false);
   const [clientBookUrl, setClientBookUrl] = useState<string | null>(null);
+  const [denyDialogOpen, setDenyDialogOpen] = useState(false);
+  const [denyMessageDraft, setDenyMessageDraft] = useState("");
+  const [offerFlowOpen, setOfferFlowOpen] = useState(false);
 
   const clientProposalUrl = useMemo(() => {
     if (!id || typeof window === "undefined") return "";
@@ -108,53 +131,61 @@ export default function IntakeDetailStep() {
     };
   }, [id, row?.proposal, row?.updatedAt]);
 
+  useEffect(() => {
+    setOfferFlowOpen(false);
+  }, [id]);
+
   async function refresh() {
     if (!id) return;
     setRow(await getIntakeById(id));
   }
 
-  async function onDeny() {
+  function closeDenyDialog() {
+    setDenyDialogOpen(false);
+    setDenyMessageDraft("");
+  }
+
+  useEffect(() => {
+    if (!denyDialogOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") closeDenyDialog();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [denyDialogOpen]);
+
+  async function beginOfferFlow() {
+    if (!id) return;
+    if (row?.status === "requests") {
+      setBusy(true);
+      try {
+        const next = await updateIntakeStatus(id, "accepted");
+        if (next) {
+          setRow(next);
+          setOfferFlowOpen(true);
+        }
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    setOfferFlowOpen(true);
+  }
+
+  async function confirmDeny() {
     if (!id) return;
     setBusy(true);
     try {
+      const note = denyMessageDraft.trim();
+      const body = note
+        ? `This request has been declined.\n\n${note}`
+        : "This request has been declined.";
+      await appendInboxMessage(id, { sender: "provider", contentType: "text", body });
       const next = await updateIntakeStatus(id, "denied");
       if (next) {
         setRow(next);
+        closeDenyDialog();
         navigate(`/inbox?tab=denied`);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmAcceptAfterPlaceholder() {
-    if (!id) return;
-    setBusy(true);
-    try {
-      const next = await updateIntakeStatus(id, "accepted");
-      if (next) {
-        setRow(next);
-        setSlotOfferOpen(false);
-        navigate(`/inbox?tab=accepted`);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function sendReply(e: FormEvent) {
-    e.preventDefault();
-    if (!id || !replyDraft.trim()) return;
-    setBusy(true);
-    try {
-      const next = await appendInboxMessage(id, {
-        sender: "provider",
-        contentType: "text",
-        body: replyDraft.trim()
-      });
-      if (next) {
-        setRow(next);
-        setReplyDraft("");
       }
     } finally {
       setBusy(false);
@@ -164,13 +195,12 @@ export default function IntakeDetailStep() {
   if (!row) {
     return (
       <div className="mx-auto max-w-4xl">
-        <div className="font-body text-sm opacity-75">Loading thread…</div>
+        <div className="font-body text-sm opacity-75">Loading…</div>
       </div>
     );
   }
 
   const displayName = [row.firstName, row.lastName].filter(Boolean).join(" ") || row.customerName;
-  const sortedMessages = [...(row.messages ?? [])].sort((a, b) => a.at.localeCompare(b.at));
 
   return (
     <div className="grid gap-6">
@@ -207,37 +237,33 @@ export default function IntakeDetailStep() {
           </div>
         </CardHeader>
         <CardBody className="grid gap-8">
-          <details className="group rounded-2xl border border-slateGrey/15 bg-white/35">
-            <summary className="cursor-pointer list-none px-4 py-3 font-display text-xs uppercase tracking-pepla text-slateGrey/80 marker:content-none [&::-webkit-details-marker]:hidden">
-              <span className="flex items-center justify-between gap-2">
-                <span>Original request</span>
-                <span className="text-[10px] font-normal opacity-60 group-open:hidden">Show</span>
-                <span className="hidden text-[10px] font-normal opacity-60 group-open:inline">Hide</span>
-              </span>
-            </summary>
-            <div className="grid gap-4 border-t border-slateGrey/10 px-4 pb-4 pt-3">
+          <section className="grid gap-4" aria-label="Original request">
+            <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Original request</div>
+            <div className="grid gap-4">
               <div className="grid gap-1">
                 <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Phone</div>
                 <div className="font-body">{row.phoneNumber}</div>
               </div>
-              <div className="grid gap-2">
+              <div className="grid gap-1.5">
                 <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Vision</div>
-                <div className="rounded-xl border border-slateGrey/10 bg-white/50 px-3 py-2.5 font-body text-sm">
-                  {row.vision?.trim() || "No vision details provided."}
-                </div>
+                <div className="font-body text-sm text-slateGrey">{row.vision?.trim() || "No vision details provided."}</div>
               </div>
-              <div className="grid gap-2">
+              <div className="grid gap-1.5">
                 <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Availability</div>
-                <div className="rounded-xl border border-slateGrey/10 bg-white/50 px-3 py-2.5 font-body text-sm">{formatAvailability(row)}</div>
+                {row.availabilitySelections ? (
+                  <IntakeAvailabilityReadGrid selections={row.availabilitySelections} />
+                ) : (
+                  <div className="font-body text-sm text-slateGrey">{formatAvailability(row)}</div>
+                )}
               </div>
               <div className="grid gap-2">
                 <div className="font-display text-[11px] uppercase tracking-pepla opacity-70">Inspiration photos</div>
                 {row.photoDataUrls.length === 0 ? (
-                  <div className="rounded-xl border border-slateGrey/10 bg-white/50 px-3 py-2.5 font-body text-sm opacity-75">No photos uploaded.</div>
+                  <div className="font-body text-sm text-slateGrey/75">No photos uploaded.</div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                     {row.photoDataUrls.map((src, idx) => (
-                      <div key={`${idx}`} className="overflow-hidden rounded-lg border border-slateGrey/10 bg-white/50">
+                      <div key={`${idx}`} className="overflow-hidden rounded-lg bg-slateGrey/10">
                         <img src={src} alt={`inspiration ${idx + 1}`} className="aspect-square w-full object-cover" />
                       </div>
                     ))}
@@ -245,152 +271,72 @@ export default function IntakeDetailStep() {
                 )}
               </div>
             </div>
-          </details>
-
-          <section className="grid gap-3">
-            <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Conversation</div>
-            {sortedMessages.length === 0 ? (
-              <div className="rounded-2xl border border-slateGrey/15 bg-white/40 px-4 py-8 text-center font-body text-sm text-slateGrey/65">
-                No messages yet. Replies and automated updates will appear here.
-              </div>
-            ) : (
-              <ul className="grid gap-3">
-                {sortedMessages.map((m) => {
-                  const isProvider = m.sender === "provider";
-                  return (
-                    <li
-                      key={m.id}
-                      className={["flex", isProvider ? "justify-end" : "justify-start"].join(" ")}
-                    >
-                      <div
-                        className={[
-                          "max-w-[min(100%,28rem)] rounded-2xl border px-3.5 py-2.5",
-                          isProvider ? "border-sky/40 bg-sky/90" : "border-slateGrey/15 bg-white/60"
-                        ].join(" ")}
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-display text-[10px] uppercase tracking-pepla text-slateGrey/55">
-                            {isProvider ? "You" : "Client"}
-                          </span>
-                          <span className="rounded bg-black/[0.06] px-1.5 py-0.5 font-display text-[9px] uppercase tracking-pepla text-slateGrey/60">
-                            {contentTypeLabel(m.contentType)}
-                          </span>
-                          <span className="ml-auto font-body text-[11px] text-slateGrey/50">{formatThreadTime(m.at)}</span>
-                        </div>
-                        {m.body.trim() ? (
-                          <p className="mt-1.5 whitespace-pre-wrap font-body text-sm text-slateGrey">{m.body}</p>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
           </section>
-
-          {row.status === "accepted" && row.proposal && (
-            <div className="rounded-2xl border border-slateGrey/15 bg-white/40 px-4 py-3 font-body text-sm">
-              <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Client booking link</div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <code className="max-w-full overflow-x-auto rounded-lg bg-white/60 px-2 py-1 text-xs">{shareClientUrl}</code>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void navigator.clipboard.writeText(shareClientUrl)}
-                >
-                  Copy
-                </Button>
-              </div>
-              {!clientBookUrl && (
-                <p className="mt-2 font-body text-xs text-slateGrey/55">
-                  Legacy link (intake id). Send a fresh offer to get a private token link.
-                </p>
-              )}
-            </div>
-          )}
 
           <section
             className="grid gap-4 border-t border-slateGrey/15 pt-6"
             aria-label="Provider actions"
           >
             {row.status === "requests" && (
-              <>
-                {slotOfferOpen && (
-                  <div className="rounded-2xl border border-dashed border-slateGrey/25 bg-white/50 px-4 py-5">
-                    <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Offer time slots</div>
-                    <p className="mt-2 font-body text-sm text-slateGrey/75">
-                      Slot selection UI will go here (calendar picks, duration, and send to client).
-                    </p>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <Button type="button" size="sm" disabled={busy} onClick={() => void confirmAcceptAfterPlaceholder()}>
-                        Mark as accepted
-                      </Button>
-                      <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setSlotOfferOpen(false)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" disabled={busy || slotOfferOpen} onClick={() => setSlotOfferOpen(true)}>
-                    Accept
-                  </Button>
-                  <Button type="button" variant="ghost" disabled={busy} onClick={() => void onDeny()}>
-                    Deny
-                  </Button>
-                </div>
-
-                <form className="grid gap-2" onSubmit={(e) => void sendReply(e)}>
-                  <Label htmlFor="thread-reply">Reply to client</Label>
-                  <Textarea
-                    id="thread-reply"
-                    value={replyDraft}
-                    onChange={(e) => setReplyDraft(e.target.value)}
-                    rows={3}
-                    placeholder="Type a message…"
-                    className="resize-y rounded-2xl border-slateGrey/20 bg-white/60"
-                  />
-                  <div className="flex justify-end">
-                    <Button type="submit" variant="ghost" size="sm" disabled={busy || !replyDraft.trim()}>
-                      Send reply
-                    </Button>
-                  </div>
-                </form>
-              </>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" disabled={busy || !id} onClick={() => void beginOfferFlow()}>
+                  Accept & offer times
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    setDenyMessageDraft("");
+                    setDenyDialogOpen(true);
+                  }}
+                >
+                  Deny
+                </Button>
+              </div>
             )}
 
             {row.status === "accepted" && (
-              <div className="grid gap-4">
-                <div className="flex flex-wrap items-center gap-3">
-                  <Link
-                    to={`/inbox/new-offer?intake=${id}`}
-                    className="font-display text-xs uppercase tracking-pepla text-slateGrey underline decoration-slateGrey/25 underline-offset-4 hover:decoration-slateGrey/50"
-                  >
-                    New offer
-                  </Link>
-                  <span className="font-body text-xs text-slateGrey/55">Send up to 5 times with a private link.</span>
-                </div>
+              <div className="grid gap-5">
                 <div>
                   <div className="font-display text-[11px] uppercase tracking-pepla opacity-80">Offered slots</div>
+
                   {row.slots.length === 0 ? (
                     <p className="mt-2 font-body text-sm text-slateGrey/70">
-                      No active offer yet. Use <span className="font-medium">New offer</span> to pick times and email a
-                      link.
+                      No active offer yet. Use <span className="font-medium">New offer</span> below to pick times and send a link.
                     </p>
                   ) : (
-                    <ul className="mt-2 grid gap-2">
-                      {row.slots.map((s) => (
-                        <li
-                          key={s.id}
-                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slateGrey/15 bg-white/50 px-3 py-2.5 font-body text-sm"
-                        >
-                          <span>{formatSlotLine(s.startISO, s.durationMins)}</span>
-                          <span className="font-display text-[10px] uppercase tracking-pepla text-slateGrey/60">{s.status}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
+                      <div className="flex flex-wrap gap-2">
+                        {row.slots.map((s) => (
+                          <OfferedSlotCard key={s.id} slot={s} />
+                        ))}
+                      </div>
+
+                      {row.proposal && (
+                        <div className="min-w-0 flex-1 border-t border-slateGrey/15 pt-4 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
+                          <div className="font-display text-[10px] uppercase tracking-pepla text-slateGrey/60">Client booking link</div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <code className="max-w-full flex-1 overflow-x-auto break-all rounded-lg border border-slateGrey/15 bg-white/60 px-2 py-1.5 font-body text-[11px] text-slateGrey">
+                              {shareClientUrl}
+                            </code>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => void navigator.clipboard.writeText(shareClientUrl)}
+                            >
+                              Copy
+                            </Button>
+                          </div>
+                          {!clientBookUrl && (
+                            <p className="mt-2 font-body text-xs text-slateGrey/55">
+                              Legacy link (intake id). Send a fresh offer to get a private token link.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -418,6 +364,13 @@ export default function IntakeDetailStep() {
                 <Button type="button" variant="ghost" size="sm" className="w-fit" disabled>
                   Edit slot offer (coming soon)
                 </Button>
+
+                <div className="grid max-w-md gap-2 border-t border-slateGrey/15 pt-5">
+                  <Button type="button" className="w-full justify-center sm:w-auto sm:min-w-[14rem]" onClick={() => setOfferFlowOpen(true)}>
+                    New offer
+                  </Button>
+                  <p className="font-body text-xs text-slateGrey/55">Send up to five time options with a private booking link.</p>
+                </div>
               </div>
             )}
 
@@ -443,6 +396,68 @@ export default function IntakeDetailStep() {
           </section>
         </CardBody>
       </Card>
+
+      {offerFlowOpen && id && row.status === "accepted" && (
+        <Card>
+          <CardHeader>
+            <div className="font-display tracking-pepla text-xs uppercase opacity-80">Offer times</div>
+            <div className="font-body mt-2 text-xl text-slateGrey">Build offer for {displayName}</div>
+          </CardHeader>
+          <CardBody>
+            <IntakeOfferForm
+              intakeId={id}
+              clientAvailabilitySelections={row.availabilitySelections ?? null}
+              variant="embedded"
+              onCancel={() => setOfferFlowOpen(false)}
+              onSent={() => void refresh()}
+            />
+          </CardBody>
+        </Card>
+      )}
+
+      {denyDialogOpen && (
+        <div
+          className="fixed inset-0 z-[60] grid place-items-center bg-slateGrey/35 px-4 py-8"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeDenyDialog();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="deny-dialog-title"
+            className="w-full max-w-md rounded-2xl border border-slateGrey/15 bg-chalk px-5 py-5 shadow-lg"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div id="deny-dialog-title" className="font-body text-lg text-slateGrey">
+              Deny this request?
+            </div>
+            <p className="mt-2 font-body text-sm text-slateGrey/75">
+              The client will be notified that the request was declined. You can add an optional personal message below.
+            </p>
+            <div className="mt-4 grid gap-2">
+              <Label htmlFor="deny-message">Message to client (optional)</Label>
+              <Textarea
+                id="deny-message"
+                value={denyMessageDraft}
+                onChange={(e) => setDenyMessageDraft(e.target.value)}
+                rows={4}
+                placeholder="e.g. We’re fully booked for the style you described…"
+                className="resize-y rounded-xl border-slateGrey/20 bg-white/70 font-body text-sm"
+              />
+            </div>
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="ghost" disabled={busy} onClick={closeDenyDialog}>
+                Cancel
+              </Button>
+              <Button type="button" disabled={busy} onClick={() => void confirmDeny()}>
+                Deny request
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
